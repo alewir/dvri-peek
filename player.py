@@ -277,11 +277,39 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .on{background:#22c55e}.off{background:#ef4444}.wait{background:#eab308}
  /* grid */
  .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));flex:1 1 auto;min-height:0;overflow:auto;align-content:start}
- .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;position:relative}
+ .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;position:relative;aspect-ratio:16/9}
  .cell img{width:100%;display:block;aspect-ratio:16/9;object-fit:contain;background:#000}
  .cell .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;background:linear-gradient(#000b,#0000)}
+ /* collapsible header */
+ header.collapsed{display:none}
+ #revealbar{position:fixed;top:0;left:0;right:0;height:6px;background:#2563eb55;cursor:pointer;z-index:20;display:none}
+ body.headerhidden #revealbar{display:block}
+ /* settings mode */
+ .thumb .picker,.cell .picker{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none}
+ body.settings .thumb .picker,body.settings .cell .picker{display:block}
+ .titleoverlay{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;
+   font-weight:600;background:linear-gradient(#000b,#0000);z-index:3;pointer-events:none}
+ .pluginframe{width:100%;height:100%;border:0;background:#000;display:block}
+ .thumb.active{outline:2px solid var(--accent);outline-offset:-2px}
+ /* big pane media container */
+ .bigmedia{flex:1 1 auto;min-height:0;overflow:hidden;background:#000}
+ .bigmedia img{width:100%;height:100%;object-fit:contain;display:block}
+ .bigmedia iframe{width:100%;height:100%;border:0;display:block}
+ /* tile media container */
+ .tmediadiv{position:absolute;inset:0;overflow:hidden}
+ .tmediadiv img{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+ .tmediadiv iframe{width:100%;height:100%;background:#000;border:0;display:block}
 </style></head><body>
 """
+
+
+def _tile_media(source_id, ctx):
+    """Return inner media HTML for a source in a given context (tile/main/filler)."""
+    if source_id and source_id.startswith("plugin:"):
+        pid = source_id.split(":", 1)[1]
+        return (f'<iframe class="pluginframe" src="/plugin/{pid}/view?ctx={ctx}"'
+                f' frameborder="0"></iframe>')
+    return f'<img class="cam" data-id="{source_id}" src="/stream/{source_id}">'
 
 
 def render_spotlight(dev):
@@ -291,15 +319,17 @@ def render_spotlight(dev):
     for ln in lenses:
         lid, lname = ln["id"], ln.get("name", ln["id"])
         thumbs += f"""
-        <div class="thumb" id="th-{lid}" data-lens="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
-          <div class="lbl"><span>{lname}</span><span id="meta-{lid}"><span class="dot wait"></span></span></div>
-          <img class="timg" id="timg-{lid}" src="/stream/{lid}">
+        <div class="thumb" id="th-{lid}" data-lens="{lid}" data-slot="{lid}" data-source="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
+          <div class="lbl"><span class="tname">{lname}</span><span id="meta-{lid}"><span class="dot wait"></span></span></div>
+          <div class="titleoverlay"></div>
+          <div class="tmediadiv" id="tmedia-{lid}">{_tile_media(lid, "tile")}</div>
+          <select class="picker" data-slot="{lid}" data-dev="{dev['id']}"></select>
         </div>"""
     return f"""
     <div class="spot" id="spot-{dev['id']}">
       <div class="big">
         <div class="cap" id="bigcap-{dev['id']}">{lenses[0].get('name','')}</div>
-        <img id="big-{dev['id']}" src="/stream/{first}">
+        <div class="bigmedia" id="bigmedia-{dev['id']}">{_tile_media(first, "main")}</div>
       </div>
       <div class="divider" data-dev="{dev['id']}" title="Drag to resize">⋮</div>
       <div class="thumbs">{thumbs}</div>
@@ -311,9 +341,10 @@ def render_grid(dev):
     for ln in dev["lenses"]:
         lid, lname = ln["id"], ln.get("name", ln["id"])
         cells += f"""
-        <div class="cell">
+        <div class="cell" data-source="{lid}" data-slot="{lid}" data-dev="{dev['id']}">
           <div class="lbl"><span>{lname}</span> <span id="meta-{lid}"><span class="dot wait"></span></span></div>
-          <img src="/stream/{lid}">
+          <div class="tmediadiv">{_tile_media(lid, "tile")}</div>
+          <select class="picker" data-slot="{lid}" data-dev="{dev['id']}"></select>
         </div>"""
     return f'<div class="grid">{cells}</div>'
 
@@ -331,38 +362,139 @@ def index():
     head = PAGE_HEAD
     controls = (f'<div class="right">'
                 f'<button class="sbtn{" active" if mode=="main" else ""}" id="b-main" onclick="setStream(\'main\')">Main HD</button>'
-                f'<button class="sbtn{" active" if mode=="sub" else ""}" id="b-sub" onclick="setStream(\'sub\')">Sub</button></div>')
+                f'<button class="sbtn{" active" if mode=="sub" else ""}" id="b-sub" onclick="setStream(\'sub\')">Sub</button>'
+                f'<button class="sbtn" id="gear" onclick="toggleSettings()">&#9881;</button>'
+                f'<button class="sbtn" id="header-collapse" onclick="collapseHeader()">&#9662;</button>'
+                f'</div>')
     script = """
 <script>
-const SEL = {};   // device -> selected lens id
 function showTab(dev){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.dev===dev));
   document.querySelectorAll('.device').forEach(d=>d.classList.toggle('active',d.id==='dev-'+dev));
 }
-function promote(dev, lid){
-  const big = document.getElementById('big-'+dev);
-  if(!big) return;
-  const prev = SEL[dev];
-  // restore previously-active thumb to streaming
-  if(prev && prev!==lid){
-    const pth=document.getElementById('th-'+prev); pth.classList.remove('active');
-    const pim=document.getElementById('timg-'+prev); if(pim){ pim.src='/stream/'+prev; pim.style.display='block'; }
-    const pin=pth.querySelector('.placeholder'); if(pin) pin.remove();
+// ---- server-side layout state ----
+let LAYOUT={ui:{header_collapsed:false},devices:{}};
+let SOURCES=[];
+async function loadState(){
+  try{
+    [SOURCES,LAYOUT]=await Promise.all([
+      fetch('/api/sources').then(r=>r.json()),
+      fetch('/api/layout').then(r=>r.json())
+    ]);
+  }catch(e){ console.error('loadState failed:',e); SOURCES=SOURCES||[]; }
+  applyHeader(!!(LAYOUT.ui&&LAYOUT.ui.header_collapsed));
+  applyAssignments();
+  document.querySelectorAll('.device').forEach(d=>{
+    const dev=d.id.replace('dev-','');
+    if(d.querySelector('.spot')) initDivider(dev);
+  });
+}
+function saveUI(ui){LAYOUT.ui=Object.assign({},LAYOUT.ui,ui);
+  fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(LAYOUT)});}
+function saveLayout(){fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(LAYOUT)});}
+function toggleSettings(){document.body.classList.toggle('settings');
+  if(!document.body.classList.contains('settings')) saveLayout();}
+// ---- collapsible header ----
+function applyHeader(c){document.body.classList.toggle('headerhidden',c);
+  document.querySelector('header').classList.toggle('collapsed',c);}
+function collapseHeader(){applyHeader(true);saveUI({header_collapsed:true});}
+function showHeader(){applyHeader(false);saveUI({header_collapsed:false});}
+// ---- media helper ----
+function _mediaHTML(srcId,ctx){
+  if(!srcId) return '';
+  if(srcId.startsWith('plugin:')){
+    const pid=srcId.split(':')[1];
+    return '<iframe class="pluginframe" src="/plugin/'+pid+'/view?ctx='+ctx+'" frameborder="0"></iframe>';
   }
-  // big pane shows selected lens
-  big.src='/stream/'+lid+'?t='+Date.now();
-  const cap=document.getElementById('bigcap-'+dev); if(cap) cap.textContent=document.querySelector('#th-'+lid+' .lbl span').textContent;
-  // disable selected thumb (stop streaming it twice)
-  const th=document.getElementById('th-'+lid); th.classList.add('active');
-  const im=document.getElementById('timg-'+lid);
-  if(im){ im.src=''; im.style.display='none';
-    if(!th.querySelector('.placeholder')){
-      const ph=document.createElement('div'); ph.className='placeholder'; ph.textContent='● Live in main view';
-      th.appendChild(ph);
+  return '<img class="cam" data-id="'+srcId+'" src="/stream/'+srcId+'">';
+}
+// ---- tile assignments ----
+function applyAssignments(){
+  document.querySelectorAll('.device').forEach(d=>{
+    const dev=d.id.replace('dev-','');
+    const devState=(LAYOUT.devices&&LAYOUT.devices[dev])||{};
+    const tiles=devState.tiles||{};
+    const filler=devState.filler||null;
+    const thumbEls=[...d.querySelectorAll('.thumb[data-dev="'+dev+'"]')];
+    // determine selected source (falls back to first thumb's default)
+    let selected=devState.selected||null;
+    if(!selected&&thumbEls.length>0) selected=thumbEls[0].dataset.source;
+    // spotlight: big pane + thumbnails
+    if(thumbEls.length>0){
+      const selThumb=thumbEls.find(t=>t.dataset.source===selected)||thumbEls[0];
+      if(selThumb){
+        const selSrc=tiles[selThumb.dataset.slot]||selThumb.dataset.source;
+        const bigmedia=d.querySelector('#bigmedia-'+dev);
+        if(bigmedia) bigmedia.innerHTML=_mediaHTML(selSrc,'main');
+        const bigcap=d.querySelector('#bigcap-'+dev);
+        if(bigcap){
+          const meta=SOURCES.find(s=>s.id===selSrc);
+          bigcap.textContent=meta?meta.name:((selThumb.querySelector('.tname')||{}).textContent||'');
+        }
+      }
+      thumbEls.forEach(th=>{
+        const slot=th.dataset.slot;
+        const defaultSrc=th.dataset.source;
+        const assignedSrc=tiles[slot]||defaultSrc;
+        const isActive=th.dataset.source===selected;
+        th.classList.toggle('active',isActive);
+        // tile media: active shows filler (or placeholder); others show assigned source
+        const mediaDiv=th.querySelector('.tmediadiv');
+        if(mediaDiv){
+          if(isActive&&filler) mediaDiv.innerHTML=_mediaHTML(filler,'filler');
+          else if(isActive) mediaDiv.innerHTML='<div class="placeholder">&#9679; Live in main view</div>';
+          else mediaDiv.innerHTML=_mediaHTML(assignedSrc,'tile');
+        }
+        // title overlay: shown on active tile to label the slot
+        const overlay=th.querySelector('.titleoverlay');
+        if(overlay) overlay.textContent=isActive?((th.querySelector('.tname')||{}).textContent||''):'';
+        // populate picker: active tile picker selects filler; others select slot source
+        const picker=th.querySelector('.picker');
+        if(picker&&SOURCES.length>0){
+          const pickerVal=isActive?(filler||''):assignedSrc;
+          picker.innerHTML=SOURCES.map(s=>'<option value="'+s.id+'"'+(s.id===pickerVal?' selected':'')+'>'+s.name+'</option>').join('');
+          if(isActive){
+            picker.onchange=()=>{
+              if(!LAYOUT.devices[dev]) LAYOUT.devices[dev]={};
+              LAYOUT.devices[dev].filler=picker.value;
+              applyAssignments();
+            };
+          } else {
+            picker.onchange=()=>{
+              if(!LAYOUT.devices[dev]) LAYOUT.devices[dev]={};
+              if(!LAYOUT.devices[dev].tiles) LAYOUT.devices[dev].tiles={};
+              LAYOUT.devices[dev].tiles[slot]=picker.value;
+              applyAssignments();
+            };
+          }
+        }
+      });
     }
-  }
-  SEL[dev]=lid;
-  try{ localStorage.setItem('sel-'+dev, lid); }catch(e){}
+    // grid: update cell media + pickers (no selected/big-pane logic)
+    d.querySelectorAll('.cell[data-dev="'+dev+'"]').forEach(cell=>{
+      const slot=cell.dataset.slot;
+      const assignedSrc=tiles[slot]||cell.dataset.source;
+      const mediaDiv=cell.querySelector('.tmediadiv');
+      if(mediaDiv) mediaDiv.innerHTML=_mediaHTML(assignedSrc,'tile');
+      const picker=cell.querySelector('.picker');
+      if(picker&&SOURCES.length>0){
+        picker.innerHTML=SOURCES.map(s=>'<option value="'+s.id+'"'+(s.id===assignedSrc?' selected':'')+'>'+s.name+'</option>').join('');
+        picker.onchange=()=>{
+          if(!LAYOUT.devices[dev]) LAYOUT.devices[dev]={};
+          if(!LAYOUT.devices[dev].tiles) LAYOUT.devices[dev].tiles={};
+          LAYOUT.devices[dev].tiles[slot]=picker.value;
+          applyAssignments();
+        };
+      }
+    });
+  });
+}
+function promote(dev,lid){
+  if(!LAYOUT.devices) LAYOUT.devices={};
+  if(!LAYOUT.devices[dev]) LAYOUT.devices[dev]={};
+  LAYOUT.devices[dev].selected=lid;
+  saveLayout();
+  applyAssignments();
 }
 function initDivider(dev){
   const sp=document.getElementById('spot-'+dev); if(!sp) return;
@@ -384,7 +516,7 @@ function setStream(m){
   fetch('/set_stream?mode='+m).then(()=>{
     document.getElementById('b-sub').classList.toggle('active',m==='sub');
     document.getElementById('b-main').classList.toggle('active',m==='main');
-    document.querySelectorAll('img').forEach(i=>{ if(i.src && !i.src.endsWith('/')) i.src=i.src.split('?')[0]+'?t='+Date.now(); });
+    document.querySelectorAll('img.cam').forEach(i=>{ if(i.src && !i.src.endsWith('/')) i.src=i.src.split('?')[0]+'?t='+Date.now(); });
   });
 }
 async function poll(){
@@ -397,18 +529,13 @@ async function poll(){
   }catch(e){}
 }
 setInterval(poll,1500); poll();
-// init: restore split + selected lens (persisted) for each spotlight device
-document.querySelectorAll('.device').forEach(d=>{
-  const dev=d.id.replace('dev-','');
-  if(!d.querySelector('.spot')) return;          // grid device -> nothing to restore
-  initDivider(dev);
-  const thumbs=[...d.querySelectorAll('.thumb')].map(t=>t.dataset.lens);
-  let sel=localStorage.getItem('sel-'+dev);
-  if(!sel || !thumbs.includes(sel)) sel=thumbs[0];
-  promote(dev, sel);
-});
+loadState();
 </script></body></html>"""
-    return head + '<header><div style="font-weight:700;margin-right:8px">📷 dvri-peek</div>' + tabs + controls + '</header>' + panes + script
+    return (head
+            + '<header><div style="font-weight:700;margin-right:8px">&#128247; dvri-peek</div>'
+            + tabs + controls + '</header>'
+            + '<div id="revealbar" onclick="showHeader()" title="Show menu"></div>'
+            + panes + script)
 
 
 @app.route("/stream/<lens_id>")
