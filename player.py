@@ -38,6 +38,9 @@ import numpy as np
 import yaml
 from flask import Flask, Response, jsonify, request
 
+import layout as layout_mod
+import plugins as plugins_mod
+
 # dvrip/rtsp stream index per mode
 SUBTYPE = {"sub": 1, "main": 0}        # dvrip subtype / rtsp stream index
 
@@ -223,6 +226,16 @@ app = Flask(__name__)
 CFG = None
 WORKERS = {}        # lens_id -> LensWorker
 DEVICES = []        # config devices (for rendering)
+REGISTRY = None
+STORE = None
+
+
+def load_secrets(path="secrets.local.yaml"):
+    try:
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+    except (FileNotFoundError, OSError):
+        return {}
 
 
 PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
@@ -439,34 +452,51 @@ def set_stream():
     return jsonify({"ok": True, "mode": mode})
 
 
+def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gateway=True):
+    global CFG, DEVICES, REGISTRY, STORE
+    here = os.path.dirname(os.path.abspath(__file__))
+    config_path = config_path or os.path.join(here, "cameras.yaml")
+    CFG = load_config(config_path)
+    DEVICES = CFG["devices"]
+    pl = CFG.get("player", {})
+    mode = stream_mode or pl.get("default_stream", "sub")
+
+    secrets = load_secrets(os.path.join(here, "secrets.local.yaml"))
+    REGISTRY = plugins_mod.PluginRegistry(os.path.join(here, "plugins"), secrets=secrets)
+    REGISTRY.discover()
+    STORE = layout_mod.LayoutStore(os.path.join(here, "state.local.json"))
+
+    if "plugins" not in app.blueprints:
+        app.register_blueprint(plugins_mod.create_plugins_blueprint(REGISTRY))
+    if "layout" not in app.blueprints:
+        app.register_blueprint(layout_mod.create_layout_blueprint(CFG, REGISTRY, STORE))
+
+    if start_gateway:
+        g2_path = os.path.join(here, "go2rtc.generated.yaml")
+        lens_index = build_go2rtc_config(CFG, g2_path)
+        start_go2rtc(CFG, g2_path)
+    else:
+        lens_index = {ln["id"]: {"name": ln.get("name", ln["id"])}
+                      for dev in DEVICES for ln in dev["lenses"]}
+    if start_workers:
+        gw = CFG.get("gateway", {})
+        for lid, meta in lens_index.items():
+            w = LensWorker(lid, meta["name"], gw, pl.get("jpeg_quality", 75),
+                           pl.get("target_fps", 15), mode)
+            WORKERS[lid] = w
+            w.start()
+    return mode
+
+
 def main():
-    global CFG, DEVICES
     ap = argparse.ArgumentParser()
     here = os.path.dirname(os.path.abspath(__file__))
     ap.add_argument("--config", default=os.path.join(here, "cameras.yaml"))
     ap.add_argument("--stream", choices=["sub", "main"], default=None)
     ap.add_argument("--port", type=int, default=None)
     args = ap.parse_args()
-
-    CFG = load_config(args.config)
-    DEVICES = CFG["devices"]
-    gw = CFG.get("gateway", {})
-    pl = CFG.get("player", {})
-    mode = args.stream or pl.get("default_stream", "sub")
-    port = args.port or pl.get("http_port", 8090)
-
-    g2_path = os.path.join(here, "go2rtc.generated.yaml")
-    lens_index = build_go2rtc_config(CFG, g2_path)
-    print(f"go2rtc config -> {g2_path}  ({len(lens_index)} lenses)")
-    start_go2rtc(CFG, g2_path)
-    print("go2rtc started")
-
-    for lid, meta in lens_index.items():
-        w = LensWorker(lid, meta["name"], gw, pl.get("jpeg_quality", 75),
-                       pl.get("target_fps", 15), mode)
-        WORKERS[lid] = w
-        w.start()
-
+    mode = bootstrap(config_path=args.config, stream_mode=args.stream)
+    port = args.port or CFG.get("player", {}).get("http_port", 8090)
     print(f"Player: http://localhost:{port}   (stream={mode})")
     try:
         app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
