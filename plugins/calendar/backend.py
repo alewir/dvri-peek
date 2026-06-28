@@ -2,7 +2,7 @@
 # Stdlib only. Recurrence: non-recurring always; FREQ=DAILY|WEEKLY (INTERVAL,COUNT,
 # UNTIL, weekly BYDAY) expanded in-window; MONTHLY/YEARLY -> original occurrence only.
 import urllib.request
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone, timedelta
 
 _WEEKDAYS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
 

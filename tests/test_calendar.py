@@ -36,7 +36,7 @@ def test_fetch_merges_sorts_colors(monkeypatch):
     out = b.fetch({"max_events": 10, "lookahead_days": 30,
                    "sources": [{"name": "A", "color": "#111", "ics_url": "A"},
                                {"name": "B", "color": "#222", "ics_url": "B"}]})
-    assert "error" not in out
+    assert "errors" not in out                      # healthy fetch sets no errors key
     starts = [e["start"] for e in out["events"]]
     assert starts == sorted(starts)                 # merged + sorted
     assert any(e["source"] == "B" and e["color"] == "#222" for e in out["events"])
