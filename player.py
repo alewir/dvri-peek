@@ -230,7 +230,7 @@ REGISTRY = None
 STORE = None
 
 
-def load_secrets(path="secrets.local.yaml"):
+def load_secrets(path):
     try:
         with open(path) as f:
             return yaml.safe_load(f) or {}
@@ -307,7 +307,7 @@ def _tile_media(source_id, ctx):
     if source_id and source_id.startswith("plugin:"):
         pid = source_id.split(":", 1)[1]
         return (f'<iframe class="pluginframe" src="/plugin/{pid}/view?ctx={ctx}"'
-                f' frameborder="0"></iframe>')
+                f' frameborder="0" sandbox="allow-scripts allow-same-origin"></iframe>')
     return f'<img class="cam" data-id="{source_id}" src="/stream/{source_id}">'
 
 
@@ -403,7 +403,7 @@ function _mediaHTML(srcId,ctx){
   if(!srcId) return '';
   if(srcId.startsWith('plugin:')){
     const pid=srcId.split(':')[1];
-    return '<iframe class="pluginframe" src="/plugin/'+pid+'/view?ctx='+ctx+'" frameborder="0"></iframe>';
+    return '<iframe class="pluginframe" src="/plugin/'+pid+'/view?ctx='+ctx+'" frameborder="0" sandbox="allow-scripts allow-same-origin"></iframe>';
   }
   return '<img class="cam" data-id="'+srcId+'" src="/stream/'+srcId+'">';
 }

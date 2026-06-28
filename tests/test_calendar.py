@@ -35,7 +35,8 @@ def test_fetch_merges_sorts_colors(monkeypatch):
     monkeypatch.setattr(b, "_http_get", lambda url: feeds[url])
     out = b.fetch({"max_events": 10, "lookahead_days": 30,
                    "sources": [{"name": "A", "color": "#111", "ics_url": "A"},
-                               {"name": "B", "color": "#222", "ics_url": "B"}]})
+                               {"name": "B", "color": "#222", "ics_url": "B"}]},
+                  now=datetime(2026, 6, 28, tzinfo=timezone.utc))
     assert "errors" not in out                      # healthy fetch sets no errors key
     starts = [e["start"] for e in out["events"]]
     assert starts == sorted(starts)                 # merged + sorted
@@ -48,3 +49,34 @@ def test_fetch_bad_url_is_graceful(monkeypatch):
     monkeypatch.setattr(b, "_http_get", boom)
     out = b.fetch({"sources": [{"name": "X", "color": "#000", "ics_url": "http://x"}]})
     assert out["events"] == [] and "errors" in out
+
+def test_parse_tzid_converts_to_utc():
+    b = _backend()
+    ics = (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+        "BEGIN:VEVENT\r\nUID:tz1\r\nSUMMARY:Warsaw Meeting\r\n"
+        "DTSTART;TZID=Europe/Warsaw:20260629T090000\r\n"
+        "DTEND;TZID=Europe/Warsaw:20260629T100000\r\n"
+        "END:VEVENT\r\nEND:VCALENDAR\r\n"
+    )
+    evs = b.parse_ics(ics)
+    assert len(evs) == 1
+    # Warsaw is UTC+2 in summer, so 09:00 local = 07:00 UTC
+    assert evs[0]["start"] == datetime(2026, 6, 29, 7, 0, tzinfo=timezone.utc)
+
+def test_rrule_weekly_byday():
+    b = _backend()
+    ics = (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+        "BEGIN:VEVENT\r\nUID:wk1\r\nSUMMARY:Weekly\r\n"
+        "DTSTART:20260629T090000Z\r\n"
+        "DTEND:20260629T100000Z\r\n"
+        "RRULE:FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4\r\n"
+        "END:VEVENT\r\nEND:VCALENDAR\r\n"
+    )
+    evs = b.parse_ics(ics)
+    w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
+    w1 = w0 + timedelta(days=30)
+    occ = b.expand(evs, w0, w1)
+    dates = sorted(e["start"].date().isoformat() for e in occ)
+    assert dates == ["2026-06-29", "2026-07-01", "2026-07-06", "2026-07-08"]

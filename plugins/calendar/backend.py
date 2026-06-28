@@ -3,6 +3,7 @@
 # UNTIL, weekly BYDAY) expanded in-window; MONTHLY/YEARLY -> original occurrence only.
 import urllib.request
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 _WEEKDAYS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
 
@@ -25,8 +26,14 @@ def _parse_dt(val, params):
         return d, True
     if val.endswith("Z"):
         return datetime.strptime(val, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc), False
-    # naive / TZID: best-effort treat as UTC (kiosk-local display is acceptable v1)
-    return datetime.strptime(val[:15], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc), False
+    naive = datetime.strptime(val[:15], "%Y%m%dT%H%M%S")
+    tzid = params.get("TZID")
+    if tzid:
+        try:
+            return naive.replace(tzinfo=ZoneInfo(tzid)).astimezone(timezone.utc), False
+        except Exception:  # noqa: BLE001 — unknown zone: fall through to UTC
+            pass
+    return naive.replace(tzinfo=timezone.utc), False
 
 def parse_ics(text):
     events, cur = [], None
@@ -116,11 +123,11 @@ def expand(events, window_start, window_end):
                 out.append({**e, "end": e["start"] + dur, "rrule": None})
     return out
 
-def fetch(config):
+def fetch(config, now=None):
     max_events = int(config.get("max_events", 12) or 12)
     lookahead = int(config.get("lookahead_days", 30) or 30)
     sources = config.get("sources", []) or []
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     w0 = now - timedelta(hours=12)
     w1 = now + timedelta(days=lookahead)
     merged, errors = [], []

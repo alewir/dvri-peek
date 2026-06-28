@@ -94,6 +94,8 @@ def create_plugins_blueprint(registry):
         p = registry.get(pid)
         if not p:
             return ("no such plugin", 404)
+        if not (p.path / "view.html").is_file():
+            return ("plugin has no view", 404)
         return Response((p.path / "view.html").read_text(), mimetype="text/html")
 
     @bp.route("/plugin/<pid>/data")
