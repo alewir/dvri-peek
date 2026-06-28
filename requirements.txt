@@ -1,0 +1,4 @@
+flask>=3.0
+opencv-python-headless>=4.9
+numpy>=1.26
+pyyaml>=6.0

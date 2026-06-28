@@ -1,0 +1,17 @@
+# Local config with real credentials / IPs — never commit
+cameras.yaml
+
+# go2rtc binary + generated config
+go2rtc
+go2rtc_*
+go2rtc.generated.yaml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Runtime / scratch
+data/
+*.log

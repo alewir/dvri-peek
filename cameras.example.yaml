@@ -1,0 +1,59 @@
+# ============================================================================
+#  dvri-peek — configuration template
+#  Copy this file to  cameras.yaml  and fill in your own values.
+#  (cameras.yaml is git-ignored so your credentials never leave your machine.)
+# ============================================================================
+#
+#  How multi-lens XiongMai / ICSee cameras expose their lenses:
+#   - RTSP (port 554) and ONVIF usually expose ONLY lens 1 (channel 0).
+#   - The extra lenses live ONLY on the proprietary DVRIP protocol (port 34567),
+#     as channel = 0 / 1 / 2 ...  (the same protocol the ICSee app uses).
+#   - DVRIP requires the camera's OWN device account (NOT admin/blank, NOT your
+#     NVR login). Find it in the ICSee app -> device -> user/password settings;
+#     it is often an auto-generated string (e.g. user "ab12", pass "x7y9z").
+#   - go2rtc bridges DVRIP -> RTSP; the player decodes it with OpenCV.
+# ============================================================================
+
+gateway:
+  go2rtc_bin: "./go2rtc"     # path to the go2rtc binary
+  api_host: "127.0.0.1"
+  api_port: 1984
+  rtsp_port: 8554
+
+player:
+  http_port: 8090
+  default_stream: main       # main = full HD (default) | sub = low-res preview
+  jpeg_quality: 75
+  target_fps: 15
+
+devices:
+  # -- a 3-lens camera (lenses unlocked via DVRIP) -------------------------
+  - id: cam1
+    name: "3-Lens Camera"
+    layout: spotlight                 # big pane + lens thumbnails
+    host: "192.168.1.100"             # <-- your camera IP
+    dvrip_port: 34567
+    rtsp_port: 554
+    icsee_user: "YOUR_CAMERA_USER"    # <-- camera's DVRIP/ICSee device account
+    icsee_pass: "YOUR_CAMERA_PASS"
+    rtsp_user: "admin"                # RTSP fallback for lens 1 (often admin/blank)
+    rtsp_pass: ""
+    lenses:
+      - { id: lens1, name: "Lens 1", channel: 0, rtsp_channel: 1 }  # +RTSP fallback
+      - { id: lens2, name: "Lens 2", channel: 1 }                   # DVRIP only
+      - { id: lens3, name: "Lens 3", channel: 2 }                   # DVRIP only
+
+  # -- an NVR (optional) ---------------------------------------------------
+  - id: nvr1
+    name: "NVR"
+    layout: grid                      # simple responsive grid
+    host: "192.168.1.101"             # <-- your NVR IP
+    dvrip_port: 34567
+    rtsp_port: 554
+    icsee_user: "YOUR_NVR_USER"
+    icsee_pass: "YOUR_NVR_PASS"
+    rtsp_user: "YOUR_NVR_USER"
+    rtsp_pass: "YOUR_NVR_PASS"
+    lenses:
+      - { id: nvr_ch0, name: "Camera 1", channel: 0, rtsp_channel: 1 }
+      # - { id: nvr_ch1, name: "Camera 2", channel: 1 }

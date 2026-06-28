@@ -1,0 +1,483 @@
+#!/usr/bin/env python3
+"""Multi-camera live preview.
+
+Reads cameras.yaml (single source of truth), generates a go2rtc config, spawns
+go2rtc to bridge the proprietary DVRIP protocol (XiongMai/ICSee, port 34567 —
+the only way the 3-lens camera exposes lenses 2 & 3) into plain RTSP, then
+decodes each stream with OpenCV and serves a web UI:
+
+  * one TAB per device
+  * "spotlight" layout: big pane (left 2/3) + lens thumbnails (right);
+    click a thumbnail to promote it to the big pane — the active lens's
+    thumbnail is disabled (not streamed twice).
+  * "grid" layout for simple multi-cam devices (the NVR).
+
+RTP is carried over TCP everywhere (WSL2 NAT drops UDP RTP return packets).
+
+Usage:  python player.py [--config cameras.yaml] [--stream sub|main] [--port N]
+Open    http://localhost:<port>
+"""
+import os
+import sys
+import time
+import json
+import signal
+import argparse
+import threading
+import subprocess
+import urllib.request
+import urllib.parse
+
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "rtsp_transport;tcp|stimeout;8000000|max_delay;500000",
+)
+
+import cv2
+import numpy as np
+import yaml
+from flask import Flask, Response, jsonify, request
+
+# dvrip/rtsp stream index per mode
+SUBTYPE = {"sub": 1, "main": 0}        # dvrip subtype / rtsp stream index
+
+GO2RTC_PROC = None
+
+
+# --------------------------------------------------------------------------- #
+#  Config + go2rtc generation
+# --------------------------------------------------------------------------- #
+def load_config(path):
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def _dvrip_url(dev, channel, subtype):
+    u = urllib.parse.quote(str(dev.get("icsee_user", "")), safe="")
+    p = urllib.parse.quote(str(dev.get("icsee_pass", "")), safe="")
+    return (f"dvrip://{u}:{p}@{dev['host']}:{dev.get('dvrip_port', 34567)}"
+            f"?channel={channel}&subtype={subtype}")
+
+
+def _rtsp_url(dev, rtsp_channel, stream_idx):
+    return (f"rtsp://{dev['host']}:{dev.get('rtsp_port', 554)}"
+            f"/user={dev.get('rtsp_user','admin')}&password={dev.get('rtsp_pass','')}"
+            f"&channel={rtsp_channel}&stream={stream_idx}.sdp?real_stream")
+
+
+def build_go2rtc_config(cfg, out_path):
+    """Generate a go2rtc YAML. Each lens gets a <id> (sub) and <id>_main stream,
+    each a failover list: DVRIP first, then RTSP fallback when available."""
+    gw = cfg.get("gateway", {})
+    streams = {}
+    lens_index = {}   # lens_id -> {device, name, has_main}
+    for dev in cfg["devices"]:
+        for lens in dev["lenses"]:
+            lid = lens["id"]
+            for mode, sub in SUBTYPE.items():
+                name = lid if mode == "sub" else f"{lid}_main"
+                srcs = [_dvrip_url(dev, lens["channel"], sub)]
+                if "rtsp_channel" in lens:
+                    srcs.append(_rtsp_url(dev, lens["rtsp_channel"], sub))
+                streams[name] = srcs
+            lens_index[lid] = {"device": dev["id"], "name": lens.get("name", lid)}
+    g2 = {
+        "log": {"level": "info"},
+        "api": {"listen": f"{gw.get('api_host','127.0.0.1')}:{gw.get('api_port',1984)}"},
+        "rtsp": {"listen": f":{gw.get('rtsp_port',8554)}"},
+        "streams": streams,
+    }
+    with open(out_path, "w") as f:
+        yaml.safe_dump(g2, f, sort_keys=False, default_style="'")
+    return lens_index
+
+
+def start_go2rtc(cfg, config_path):
+    global GO2RTC_PROC
+    gw = cfg.get("gateway", {})
+    binary = gw.get("go2rtc_bin", "./go2rtc")
+    binary = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          binary) if binary.startswith("./") else binary
+    logf = open("/tmp/go2rtc_player.log", "w")
+    GO2RTC_PROC = subprocess.Popen([binary, "-config", config_path],
+                                   stdout=logf, stderr=subprocess.STDOUT)
+    api = f"http://{gw.get('api_host','127.0.0.1')}:{gw.get('api_port',1984)}/api/streams"
+    for _ in range(100):
+        try:
+            urllib.request.urlopen(api, timeout=1)
+            return
+        except Exception:
+            time.sleep(0.1)
+    print("WARNING: go2rtc API did not come up", file=sys.stderr)
+
+
+def stop_go2rtc():
+    if GO2RTC_PROC and GO2RTC_PROC.poll() is None:
+        GO2RTC_PROC.terminate()
+        try:
+            GO2RTC_PROC.wait(timeout=5)
+        except Exception:
+            GO2RTC_PROC.kill()
+
+
+# --------------------------------------------------------------------------- #
+#  Per-lens grabber (reads go2rtc's RTSP restream)
+# --------------------------------------------------------------------------- #
+class LensWorker(threading.Thread):
+    def __init__(self, lens_id, name, gw, jpeg_quality, target_fps, stream_mode):
+        super().__init__(daemon=True)
+        self.id = lens_id
+        self.name = name
+        self._rtsp_host = gw.get("api_host", "127.0.0.1")
+        self._rtsp_port = gw.get("rtsp_port", 8554)
+        self.jpeg_quality = jpeg_quality
+        self.min_period = 1.0 / max(target_fps, 1)
+        self._mode = stream_mode
+        self._lock = threading.Lock()
+        self._jpeg = None
+        self._stop = threading.Event()
+        self._reconnect = threading.Event()
+        self.status = "connecting"
+        self.resolution = "-"
+        self.fps = 0.0
+
+    def url(self):
+        name = self.id if self._mode == "sub" else f"{self.id}_main"
+        return f"rtsp://{self._rtsp_host}:{self._rtsp_port}/{name}"
+
+    def set_stream(self, mode):
+        if mode in SUBTYPE and mode != self._mode:
+            self._mode = mode
+            self._reconnect.set()
+
+    @property
+    def stream_mode(self):
+        return self._mode
+
+    def stop(self):
+        self._stop.set()
+
+    def get_jpeg(self):
+        with self._lock:
+            return self._jpeg
+
+    def _placeholder(self, lines, color=(60, 200, 255)):
+        img = np.zeros((360, 640, 3), dtype=np.uint8)
+        for i, line in enumerate(lines):
+            cv2.putText(img, line, (24, 70 + 38 * i),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
+        ok, buf = cv2.imencode(".jpg", img)
+        with self._lock:
+            self._jpeg = buf.tobytes() if ok else None
+
+    def run(self):
+        enc = [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
+        while not self._stop.is_set():
+            self._placeholder([self.name, "connecting..."])
+            self.status = "connecting"
+            cap = cv2.VideoCapture(self.url(), cv2.CAP_FFMPEG)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if not cap.isOpened():
+                self.status = "no signal / needs credentials"
+                self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
+                cap.release()
+                if self._stop.wait(3.0):
+                    break
+                continue
+            self._reconnect.clear()
+            fail = 0
+            t_prev = time.time()
+            fps_ema = 0.0
+            while not self._stop.is_set() and not self._reconnect.is_set():
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    fail += 1
+                    if fail > 40:
+                        self.status = "no signal / needs credentials"
+                        self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
+                        break
+                    time.sleep(0.05)
+                    continue
+                fail = 0
+                now = time.time()
+                dt = now - t_prev
+                t_prev = now
+                if dt > 0:
+                    fps_ema = 0.9 * fps_ema + 0.1 / dt if fps_ema else 1.0 / dt
+                self.fps = round(fps_ema, 1)
+                h, w = frame.shape[:2]
+                self.resolution = f"{w}x{h}"
+                self.status = f"online ({self._mode})"
+                ok2, buf = cv2.imencode(".jpg", frame, enc)
+                if ok2:
+                    with self._lock:
+                        self._jpeg = buf.tobytes()
+                time.sleep(self.min_period * 0.5)
+            cap.release()
+
+
+# --------------------------------------------------------------------------- #
+#  App
+# --------------------------------------------------------------------------- #
+app = Flask(__name__)
+CFG = None
+WORKERS = {}        # lens_id -> LensWorker
+DEVICES = []        # config devices (for rendering)
+
+
+PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
+<title>dvri-peek</title>
+<style>
+ :root{--bg:#0e0e10;--panel:#1a1a1d;--line:#2e2e33;--txt:#e4e4e7;--accent:#2563eb;}
+ *{box-sizing:border-box}
+ html,body{height:100%}
+ body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,Segoe UI,Arial,sans-serif;
+      display:flex;flex-direction:column;height:100vh;overflow:hidden}
+ header{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:8px 14px;background:#161619;
+        border-bottom:1px solid var(--line);z-index:10}
+ .tab{background:#222;border:1px solid var(--line);color:#cfcfd4;border-radius:7px;
+      padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600}
+ .tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+ .right{margin-left:auto;display:flex;gap:6px;align-items:center}
+ .sbtn{background:#222;border:1px solid var(--line);color:#cfcfd4;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px}
+ .sbtn.active{background:#374151;border-color:#4b5563;color:#fff}
+ .device{display:none;padding:10px;flex:1 1 auto;min-height:0}
+ .device.active{display:flex;flex-direction:column;min-height:0}
+ /* spotlight */
+ .spot{display:flex;gap:0;align-items:stretch;flex:1 1 auto;min-height:0}
+ .big{flex:0 0 66%;min-width:160px;display:flex;flex-direction:column;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+ .big .cap{flex:0 0 auto;padding:6px 12px;font-size:13px;font-weight:600;background:#141417}
+ .big img{flex:1 1 auto;min-height:0;width:100%;height:100%;object-fit:contain;background:#000;display:block}
+ .divider{flex:0 0 16px;margin:0 5px;cursor:col-resize;border-radius:7px;background:#3a3a42;
+          display:flex;align-items:center;justify-content:center;user-select:none;color:#cbd5e1;font-size:18px;line-height:1}
+ .divider:hover,.divider.drag{background:var(--accent);color:#fff}
+ .thumbs{flex:1 1 0;min-width:150px;display:flex;flex-direction:column;gap:8px}
+ .thumb{flex:1 1 0;min-height:0;position:relative;background:#000;border:2px solid var(--line);border-radius:9px;
+        overflow:hidden;cursor:pointer}
+ .thumb.active{border-color:var(--accent);cursor:default}
+ .thumb img{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+ .thumb .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;
+             background:linear-gradient(#000b,#0000);display:flex;justify-content:space-between;z-index:2}
+ .thumb .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+             color:#9ca3af;font-size:13px;text-align:center;padding:10px}
+ .dot{width:8px;height:8px;border-radius:50%;background:#888;display:inline-block;margin-right:5px}
+ .on{background:#22c55e}.off{background:#ef4444}.wait{background:#eab308}
+ /* grid */
+ .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));flex:1 1 auto;min-height:0;overflow:auto;align-content:start}
+ .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;position:relative}
+ .cell img{width:100%;display:block;aspect-ratio:16/9;object-fit:contain;background:#000}
+ .cell .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;background:linear-gradient(#000b,#0000)}
+</style></head><body>
+"""
+
+
+def render_spotlight(dev):
+    lenses = dev["lenses"]
+    first = lenses[0]["id"]
+    thumbs = ""
+    for ln in lenses:
+        lid, lname = ln["id"], ln.get("name", ln["id"])
+        thumbs += f"""
+        <div class="thumb" id="th-{lid}" data-lens="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
+          <div class="lbl"><span>{lname}</span><span id="meta-{lid}"><span class="dot wait"></span></span></div>
+          <img class="timg" id="timg-{lid}" src="/stream/{lid}">
+        </div>"""
+    return f"""
+    <div class="spot" id="spot-{dev['id']}">
+      <div class="big">
+        <div class="cap" id="bigcap-{dev['id']}">{lenses[0].get('name','')}</div>
+        <img id="big-{dev['id']}" src="/stream/{first}">
+      </div>
+      <div class="divider" data-dev="{dev['id']}" title="Drag to resize">⋮</div>
+      <div class="thumbs">{thumbs}</div>
+    </div>"""
+
+
+def render_grid(dev):
+    cells = ""
+    for ln in dev["lenses"]:
+        lid, lname = ln["id"], ln.get("name", ln["id"])
+        cells += f"""
+        <div class="cell">
+          <div class="lbl"><span>{lname}</span> <span id="meta-{lid}"><span class="dot wait"></span></span></div>
+          <img src="/stream/{lid}">
+        </div>"""
+    return f'<div class="grid">{cells}</div>'
+
+
+@app.route("/")
+def index():
+    tabs = ""
+    panes = ""
+    for i, dev in enumerate(DEVICES):
+        active = " active" if i == 0 else ""
+        tabs += f'<button class="tab{active}" data-dev="{dev["id"]}" onclick="showTab(\'{dev["id"]}\')">{dev["name"]}</button>'
+        body = render_spotlight(dev) if dev.get("layout") == "spotlight" else render_grid(dev)
+        panes += f'<div class="device{active}" id="dev-{dev["id"]}">{body}</div>'
+    mode = next(iter(WORKERS.values())).stream_mode if WORKERS else "sub"
+    head = PAGE_HEAD
+    controls = (f'<div class="right">'
+                f'<button class="sbtn{" active" if mode=="main" else ""}" id="b-main" onclick="setStream(\'main\')">Main HD</button>'
+                f'<button class="sbtn{" active" if mode=="sub" else ""}" id="b-sub" onclick="setStream(\'sub\')">Sub</button></div>')
+    script = """
+<script>
+const SEL = {};   // device -> selected lens id
+function showTab(dev){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.dev===dev));
+  document.querySelectorAll('.device').forEach(d=>d.classList.toggle('active',d.id==='dev-'+dev));
+}
+function promote(dev, lid){
+  const big = document.getElementById('big-'+dev);
+  if(!big) return;
+  const prev = SEL[dev];
+  // restore previously-active thumb to streaming
+  if(prev && prev!==lid){
+    const pth=document.getElementById('th-'+prev); pth.classList.remove('active');
+    const pim=document.getElementById('timg-'+prev); if(pim){ pim.src='/stream/'+prev; pim.style.display='block'; }
+    const pin=pth.querySelector('.placeholder'); if(pin) pin.remove();
+  }
+  // big pane shows selected lens
+  big.src='/stream/'+lid+'?t='+Date.now();
+  const cap=document.getElementById('bigcap-'+dev); if(cap) cap.textContent=document.querySelector('#th-'+lid+' .lbl span').textContent;
+  // disable selected thumb (stop streaming it twice)
+  const th=document.getElementById('th-'+lid); th.classList.add('active');
+  const im=document.getElementById('timg-'+lid);
+  if(im){ im.src=''; im.style.display='none';
+    if(!th.querySelector('.placeholder')){
+      const ph=document.createElement('div'); ph.className='placeholder'; ph.textContent='● Live in main view';
+      th.appendChild(ph);
+    }
+  }
+  SEL[dev]=lid;
+  try{ localStorage.setItem('sel-'+dev, lid); }catch(e){}
+}
+function initDivider(dev){
+  const sp=document.getElementById('spot-'+dev); if(!sp) return;
+  const big=sp.querySelector('.big'); const div=sp.querySelector('.divider');
+  const saved=localStorage.getItem('split-'+dev); if(saved) big.style.flexBasis=saved;
+  let dragging=false;
+  div.addEventListener('mousedown',e=>{dragging=true;div.classList.add('drag');document.body.style.userSelect='none';e.preventDefault();});
+  window.addEventListener('mousemove',e=>{
+    if(!dragging)return; const r=sp.getBoundingClientRect();
+    let pct=(e.clientX-r.left)/r.width*100; pct=Math.max(25,Math.min(85,pct));
+    big.style.flexBasis=pct.toFixed(1)+'%';
+  });
+  window.addEventListener('mouseup',()=>{
+    if(!dragging)return; dragging=false; div.classList.remove('drag'); document.body.style.userSelect='';
+    try{ localStorage.setItem('split-'+dev, big.style.flexBasis); }catch(e){}
+  });
+}
+function setStream(m){
+  fetch('/set_stream?mode='+m).then(()=>{
+    document.getElementById('b-sub').classList.toggle('active',m==='sub');
+    document.getElementById('b-main').classList.toggle('active',m==='main');
+    document.querySelectorAll('img').forEach(i=>{ if(i.src && !i.src.endsWith('/')) i.src=i.src.split('?')[0]+'?t='+Date.now(); });
+  });
+}
+async function poll(){
+  try{const s=await (await fetch('/status')).json();
+    for(const c of s){ const m=document.getElementById('meta-'+c.id); if(!m)continue;
+      const on=c.status.startsWith('online');
+      m.innerHTML='<span class="dot '+(on?'on':(c.status==='connecting'?'wait':'off'))+'"></span>'+
+                  (on? c.resolution+' '+c.fps+'f':'');
+    }
+  }catch(e){}
+}
+setInterval(poll,1500); poll();
+// init: restore split + selected lens (persisted) for each spotlight device
+document.querySelectorAll('.device').forEach(d=>{
+  const dev=d.id.replace('dev-','');
+  if(!d.querySelector('.spot')) return;          // grid device -> nothing to restore
+  initDivider(dev);
+  const thumbs=[...d.querySelectorAll('.thumb')].map(t=>t.dataset.lens);
+  let sel=localStorage.getItem('sel-'+dev);
+  if(!sel || !thumbs.includes(sel)) sel=thumbs[0];
+  promote(dev, sel);
+});
+</script></body></html>"""
+    return head + '<header><div style="font-weight:700;margin-right:8px">📷 dvri-peek</div>' + tabs + controls + '</header>' + panes + script
+
+
+@app.route("/stream/<lens_id>")
+def stream(lens_id):
+    w = WORKERS.get(lens_id)
+    if not w:
+        return "no such lens", 404
+
+    def gen():
+        period = 1.0 / max(CFG["player"].get("target_fps", 15), 1)
+        while True:
+            jpg = w.get_jpeg()
+            if jpg:
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                       + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+            time.sleep(period)
+    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.route("/snapshot/<lens_id>")
+def snapshot(lens_id):
+    w = WORKERS.get(lens_id)
+    if not w:
+        return "no such lens", 404
+    jpg = w.get_jpeg()
+    return Response(jpg, mimetype="image/jpeg") if jpg else ("no frame", 503)
+
+
+@app.route("/status")
+def status():
+    return jsonify([{"id": w.id, "name": w.name, "status": w.status,
+                     "resolution": w.resolution, "fps": w.fps, "stream": w.stream_mode}
+                    for w in WORKERS.values()])
+
+
+@app.route("/set_stream")
+def set_stream():
+    mode = request.args.get("mode", "sub")
+    for w in WORKERS.values():
+        w.set_stream(mode)
+    return jsonify({"ok": True, "mode": mode})
+
+
+def main():
+    global CFG, DEVICES
+    ap = argparse.ArgumentParser()
+    here = os.path.dirname(os.path.abspath(__file__))
+    ap.add_argument("--config", default=os.path.join(here, "cameras.yaml"))
+    ap.add_argument("--stream", choices=["sub", "main"], default=None)
+    ap.add_argument("--port", type=int, default=None)
+    args = ap.parse_args()
+
+    CFG = load_config(args.config)
+    DEVICES = CFG["devices"]
+    gw = CFG.get("gateway", {})
+    pl = CFG.get("player", {})
+    mode = args.stream or pl.get("default_stream", "sub")
+    port = args.port or pl.get("http_port", 8090)
+
+    g2_path = os.path.join(here, "go2rtc.generated.yaml")
+    lens_index = build_go2rtc_config(CFG, g2_path)
+    print(f"go2rtc config -> {g2_path}  ({len(lens_index)} lenses)")
+    start_go2rtc(CFG, g2_path)
+    print("go2rtc started")
+
+    for lid, meta in lens_index.items():
+        w = LensWorker(lid, meta["name"], gw, pl.get("jpeg_quality", 75),
+                       pl.get("target_fps", 15), mode)
+        WORKERS[lid] = w
+        w.start()
+
+    print(f"Player: http://localhost:{port}   (stream={mode})")
+    try:
+        app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
+    finally:
+        for w in WORKERS.values():
+            w.stop()
+        stop_go2rtc()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        stop_go2rtc()
