@@ -100,6 +100,92 @@ full annotated template). Per device you set the host, ports, credentials, a
 DVRIP `channel`. A lens may add `rtsp_channel` for an RTSP fallback. The player
 generates `go2rtc.generated.yaml` from this on every start.
 
+## Plugins
+
+dvri-peek supports **dashboard tile plugins** — iframe-embedded widgets that sit
+alongside camera feeds as assignable tile or filler sources.
+
+### Folder layout
+
+Each plugin lives in its own subdirectory under `plugins/`:
+
+```
+plugins/
+  clock/
+    manifest.yaml   # required
+    view.html       # required — rendered in an iframe
+    backend.py      # optional — server-side data fetch
+  calendar/
+    manifest.yaml
+    view.html
+    backend.py
+```
+
+### `manifest.yaml` keys
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `id` | no | Plugin id; defaults to folder name |
+| `name` | no | Display name shown in the source picker |
+| `refresh_seconds` | no | Backend cache TTL (0 = no cache) |
+| `contexts` | no | List of `tile`, `main`, `filler` (default: `[tile]`) |
+
+### `view.html`
+
+The player serves `view.html` at `/plugin/<id>/view?ctx=<context>` inside an
+iframe. The `ctx` query parameter is one of `tile` (thumbnail), `main` (big
+pane), or `filler` (active-tile overlay). Use it to adapt the layout.
+
+### `backend.py` (optional)
+
+If present, the module must expose:
+
+```python
+def fetch(config: dict) -> dict: ...
+```
+
+The return value is served at `/plugin/<id>/data` (JSON). Results are cached for
+`refresh_seconds`; if that is 0 the endpoint is called on every request.
+`config` receives the plugin's block from `secrets.local.yaml` (see below).
+
+### Plugin secrets / config
+
+Plugin configuration that must not be committed (API keys, calendar URLs, etc.)
+goes in the **git-ignored** `secrets.local.yaml`:
+
+```yaml
+# secrets.local.yaml  (git-ignored — never commit this file)
+plugins:
+  calendar:
+    sources:
+      - name: "Personal"
+        ics_url: "https://example.com/your-calendar.ics"   # <-- replace with real URL
+      # - name: "Work"
+      #   ics_url: "https://example.com/work.ics"
+```
+
+### Tile and filler assignment
+
+Assign any source (camera lens or plugin) to a tile or filler slot via the
+in-app settings panel (click **⚙** in the header). Assignments are persisted in
+the git-ignored `state.local.json`.
+
+### Bundled plugins
+
+| Plugin | id | Description |
+|--------|----|-------------|
+| Clock | `clock` | Live clock widget (no backend) |
+| Calendar | `calendar` | Multi-source ICS calendar merged into a day view |
+
+### Dev workflow
+
+```bash
+pip install -r requirements-dev.txt   # adds pytest
+pytest                                # run the full test suite
+```
+
+---
+
 ## Raspberry Pi kiosk deployment
 
 Run dvri-peek on a wall-mounted Raspberry Pi that boots straight into a

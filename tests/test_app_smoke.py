@@ -23,3 +23,25 @@ def test_app_serves_sources_and_layout(tmp_path, monkeypatch):
     assert "lens1" in ids
     assert not any(s["type"] == "plugin" for s in srcs)   # empty plugins dir -> no plugin sources
     assert c.get("/api/layout").status_code == 200
+
+
+def test_no_plugins_dir_ok(tmp_path, monkeypatch):
+    """Regression: empty plugins dir yields no plugin sources; lens sources still present."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "cameras.yaml").write_text(
+        "gateway: {}\nplayer: {}\ndevices:\n  - id: cam\n    name: Cam\n    layout: spotlight\n"
+        "    host: 1.2.3.4\n    lenses:\n      - {id: lens1, name: L1, channel: 0}\n")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    import player
+    importlib.reload(player)
+    player.bootstrap(config_path="cameras.yaml", plugins_dir=str(empty),
+                     state_path=str(tmp_path / "state.local.json"),
+                     secrets_path=str(tmp_path / "secrets.local.yaml"),
+                     start_workers=False, start_gateway=False)
+    c = player.app.test_client()
+    srcs = c.get("/api/sources").get_json()
+    assert c.get("/api/sources").status_code == 200
+    ids = {s["id"] for s in srcs}
+    assert "lens1" in ids
+    assert not any(s["type"] == "plugin" for s in srcs)

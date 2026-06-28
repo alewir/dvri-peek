@@ -129,3 +129,10 @@ recording.
   should prefer sub-streams.
 - **Security:** credentials live only in the git-ignored `cameras.yaml`.
 - A `Ret:205` on DVRIP almost always means the *account* is wrong, not the host.
+
+## 10. Pluggable dashboard-tile layer
+
+Plugins autodiscovered from `plugins/<id>/` (manifest.yaml + view.html +
+optional backend.py); iframe-rendered at `/plugin/<id>/view?ctx=tile|main|filler`;
+data cached at `/plugin/<id>/data`. Server-side layout state in git-ignored
+`state.local.json`; plugin secrets in `secrets.local.yaml`. Bundled: `clock`, `calendar`.
