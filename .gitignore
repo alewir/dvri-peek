@@ -26,3 +26,6 @@ data/
 secrets.local.yaml
 *.local.yaml
 *.local.json
+
+# Superpowers planning artifacts (local only)
+docs/superpowers/
