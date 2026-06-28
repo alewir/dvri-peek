@@ -1,0 +1,5 @@
+id: calendar
+name: "Calendar"
+refresh_seconds: 1800
+contexts: [tile, main, filler]
+config: [sources, max_events, lookahead_days, refresh_minutes]
