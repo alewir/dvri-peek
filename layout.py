@@ -21,10 +21,13 @@ class LayoutStore:
                 data = json.load(f)
             if not isinstance(data, dict) or "devices" not in data:
                 return _deep_copy(DEFAULT_STATE)
-            data.setdefault("ui", {})
-            data["ui"].setdefault("header_collapsed", False)
-            data.setdefault("devices", {})
-            return data
+            # normalize on read too (drop unknown keys) so get() always
+            # returns the contract shape, matching save()
+            norm = _deep_copy(DEFAULT_STATE)
+            norm["ui"]["header_collapsed"] = bool(
+                (data.get("ui") or {}).get("header_collapsed", False))
+            norm["devices"] = data.get("devices") or {}
+            return norm
         except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):
             return _deep_copy(DEFAULT_STATE)
 
