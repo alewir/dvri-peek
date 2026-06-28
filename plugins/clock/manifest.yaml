@@ -1,0 +1,5 @@
+id: clock
+name: "Clock"
+refresh_seconds: 0
+contexts: [tile, main, filler]
+config: []

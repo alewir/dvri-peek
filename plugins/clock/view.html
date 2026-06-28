@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Clock</title>
+<style>
+ html,body{margin:0;height:100%;background:#0e0e10;color:#e4e4e7;
+   font-family:system-ui,Segoe UI,Arial,sans-serif;display:flex;
+   flex-direction:column;align-items:center;justify-content:center}
+ #t{font-weight:700;line-height:1} #d{opacity:.7;margin-top:.3em}
+ /* ctx=tile|filler are small, ctx=main is large */
+ body[data-ctx="main"] #t{font-size:14vw} body[data-ctx="main"] #d{font-size:3vw}
+ #t{font-size:7vw} #d{font-size:2.2vw}
+</style></head><body>
+<div id="t">--:--</div><div id="d"></div>
+<script>
+ const ctx=new URLSearchParams(location.search).get("ctx")||"tile";
+ document.body.dataset.ctx=ctx;
+ function tick(){const n=new Date();
+   document.getElementById("t").textContent=n.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+   document.getElementById("d").textContent=n.toLocaleDateString([], {weekday:"short",day:"numeric",month:"short"});}
+ tick(); setInterval(tick,1000);
+</script></body></html>
