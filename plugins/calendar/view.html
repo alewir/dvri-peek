@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Calendar</title>
+<style>
+ html,body{margin:0;height:100%;background:#0e0e10;color:#e4e4e7;overflow:hidden;
+   font-family:system-ui,Segoe UI,Arial,sans-serif}
+ .wrap{height:100%;overflow:auto;padding:8px 10px}
+ .ev{display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid #ffffff12}
+ .dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;align-self:center}
+ .when{opacity:.75;font-variant-numeric:tabular-nums;white-space:nowrap}
+ .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .day{opacity:.6;margin:8px 0 2px;font-size:.8em;text-transform:uppercase;letter-spacing:.05em}
+ .err{color:#fca5a5;padding:8px}
+ body[data-ctx="tile"] .wrap,body[data-ctx="filler"] .wrap{font-size:12px}
+ body[data-ctx="main"] .wrap{font-size:16px;padding:14px 18px}
+</style></head><body>
+<div class="wrap" id="wrap">…</div>
+<script>
+const ctx=new URLSearchParams(location.search).get("ctx")||"tile";
+document.body.dataset.ctx=ctx;
+const full = ctx==="main";
+function fmtTime(e){
+  if(e.allday) return "all day";
+  const d=new Date(e.start);
+  return d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+}
+function dayKey(iso){return new Date(iso).toLocaleDateString([], {weekday:"short",day:"numeric",month:"short"});}
+async function load(){
+  const wrap=document.getElementById("wrap");
+  try{
+    const d=await (await fetch("/plugin/calendar/data")).json();
+    if(d.error){wrap.innerHTML='<div class="err">'+d.error+'</div>';return;}
+    const evs=d.events||[];
+    if(!evs.length){wrap.innerHTML='<div class="day">No upcoming events</div>';}
+    else{
+      let html="",lastDay=null;
+      for(const e of evs){
+        const dk=dayKey(e.start);
+        if(full && dk!==lastDay){html+='<div class="day">'+dk+'</div>';lastDay=dk;}
+        html+='<div class="ev"><span class="dot" style="background:'+e.color+'"></span>'+
+              '<span class="when">'+(full?fmtTime(e):dk+" "+fmtTime(e))+'</span>'+
+              '<span class="title">'+e.title.replace(/[<>&]/g,"")+'</span></div>';
+      }
+      wrap.innerHTML=html;
+    }
+    if(d.errors) wrap.insertAdjacentHTML("beforeend",'<div class="err">some feeds failed</div>');
+  }catch(err){wrap.innerHTML='<div class="err">calendar offline</div>';}
+}
+load(); setInterval(load, 5*60*1000);
+</script></body></html>
