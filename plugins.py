@@ -62,20 +62,25 @@ class PluginRegistry:
 
     def data(self, pid):
         p = self.get(pid)
-        if not p or not p.backend:
+        if not p:
+            return {"error": "unknown plugin"}
+        if not p.backend:
             return {"error": "no backend"}
-        now = time.time()
+        cfg = (self.secrets.get("plugins", {}) or {}).get(pid, {}) or {}
+        # Single lock scope over check + fetch + store: concurrent requests for
+        # the same backend plugin serialize (suppressing a fetch stampede); a
+        # no-backend plugin returned above and never reaches the lock.
         with self._lock:
+            now = time.time()
             cached = self._cache.get(pid)
             if cached and p.refresh and (now - cached[0]) < p.refresh:
                 return cached[1]
-        cfg = (self.secrets.get("plugins", {}) or {}).get(pid, {}) or {}
-        try:
-            result = p.backend.fetch(cfg)
-            if not isinstance(result, dict):
-                result = {"error": "backend did not return a dict"}
-        except Exception as e:                           # noqa: BLE001
-            result = {"error": str(e)}
-        with self._lock:
-            self._cache[pid] = (now, result)
-        return result
+            try:
+                result = p.backend.fetch(cfg)
+                if not isinstance(result, dict):
+                    result = {"error": "backend did not return a dict"}
+            except Exception as e:                       # noqa: BLE001
+                result = {"error": str(e)}
+            if p.refresh:                                # only cache when a TTL applies
+                self._cache[pid] = (now, result)
+            return result
