@@ -21,3 +21,8 @@ data/
 
 # Local Pi operational doc (host-specific + credential refs)
 .meta/raspi-setup.md
+
+# Local plugin secrets (calendar ICS URL, etc.) — never commit
+secrets.local.yaml
+*.local.yaml
+*.local.json
