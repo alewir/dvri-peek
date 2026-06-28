@@ -3,6 +3,8 @@ import json
 import os
 import threading
 
+from flask import Blueprint, jsonify, request
+
 DEFAULT_STATE = {"ui": {"header_collapsed": False}, "devices": {}}
 
 def _deep_copy(d):
@@ -48,3 +50,26 @@ class LayoutStore:
             os.replace(tmp, self.path)
             self._state = merged
             return _deep_copy(merged)
+
+def create_layout_blueprint(config, registry, store):
+    bp = Blueprint("layout", __name__)
+
+    @bp.route("/api/sources")
+    def sources():
+        out = []
+        for dev in config.get("devices", []):
+            for lens in dev.get("lenses", []):
+                out.append({"id": lens["id"], "name": lens.get("name", lens["id"]),
+                            "type": "lens", "device": dev["id"]})
+        for p in registry.list():
+            out.append({"id": f"plugin:{p.id}", "name": p.name,
+                        "type": "plugin", "contexts": p.contexts})
+        return jsonify(out)
+
+    @bp.route("/api/layout", methods=["GET", "POST"])
+    def layout():
+        if request.method == "POST":
+            return jsonify(store.save(request.get_json(force=True, silent=True) or {}))
+        return jsonify(store.get())
+
+    return bp

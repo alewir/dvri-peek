@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import yaml
+from flask import Blueprint, Response, jsonify, send_from_directory
 
 class Plugin:
     def __init__(self, pid, path, manifest, backend):
@@ -84,3 +85,26 @@ class PluginRegistry:
             if p.refresh:                                # only cache when a TTL applies
                 self._cache[pid] = (now, result)
             return result
+
+def create_plugins_blueprint(registry):
+    bp = Blueprint("plugins", __name__)
+
+    @bp.route("/plugin/<pid>/view")
+    def view(pid):
+        p = registry.get(pid)
+        if not p:
+            return ("no such plugin", 404)
+        return Response((p.path / "view.html").read_text(), mimetype="text/html")
+
+    @bp.route("/plugin/<pid>/data")
+    def data(pid):
+        return jsonify(registry.data(pid))
+
+    @bp.route("/plugin/<pid>/static/<path:fn>")
+    def static_(pid, fn):
+        p = registry.get(pid)
+        if not p:
+            return ("no such plugin", 404)
+        return send_from_directory(str(p.path / "static"), fn)
+
+    return bp
