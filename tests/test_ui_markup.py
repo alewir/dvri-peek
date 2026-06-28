@@ -21,10 +21,13 @@ def _client(tmp_path, monkeypatch):
 
 def test_index_has_settings_and_collapse_controls(tmp_path, monkeypatch):
     html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
-    # settings toggle button (gear)
-    assert 'id="gear"' in html or 'settings' in html.lower()
-    # header collapse control
-    assert 'header-collapse' in html or 'collapseHeader' in html
+    # settings toggle button — specific id + handler (no permissive fallback:
+    # the word "settings" leaks from a CSS comment and would never fail)
+    assert 'id="gear"' in html
+    assert 'toggleSettings()' in html
+    # header collapse control — specific id + handler
+    assert 'id="header-collapse"' in html
+    assert 'collapseHeader()' in html
     # UI fetches from the server-side API endpoints
     assert '/api/layout' in html
     assert '/api/sources' in html
@@ -32,43 +35,43 @@ def test_index_has_settings_and_collapse_controls(tmp_path, monkeypatch):
 
 def test_index_tiles_have_data_source_and_slot(tmp_path, monkeypatch):
     html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
-    # Each tile should have a data-source attribute for JS assignment
+    # Each tile carries both attributes the JS uses to map slots -> sources
     assert 'data-source=' in html
-    # Tiles have stable slot IDs for JS targeting
-    assert 'data-slot=' in html or 'id="th-' in html
+    assert 'data-slot=' in html
 
 
 def test_index_revealbar_present(tmp_path, monkeypatch):
     html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
-    # The reveal bar lets user show the collapsed header
-    assert 'revealbar' in html
+    # The reveal bar lets the user restore a collapsed header
+    assert 'id="revealbar"' in html
+    assert 'showHeader()' in html
 
 
 def test_index_apply_assignments_and_load_state_in_js(tmp_path, monkeypatch):
     html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
-    # The JS must call loadState() on startup (replaces localStorage init)
-    assert 'loadState' in html
+    # loadState() runs on startup (replaces the old localStorage init)
+    assert 'loadState()' in html
     # applyAssignments is the core JS function wiring tiles
-    assert 'applyAssignments' in html
+    assert 'function applyAssignments()' in html
 
 
 def test_index_big_pane_has_media_container(tmp_path, monkeypatch):
     html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
-    # big pane renders an initial media element (img for lens)
-    assert 'id="bigmedia-cam"' in html or 'class="cam"' in html
+    # big pane renders a stable, device-scoped media container the JS swaps
+    assert 'id="bigmedia-cam"' in html
 
 
 def test_index_tile_picker_select_present(tmp_path, monkeypatch):
     html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
-    # Settings-mode picker select elements should exist (hidden until .settings mode)
-    assert 'class="picker"' in html or 'picker' in html
+    # Settings-mode picker <select> exists (hidden until body.settings)
+    assert 'class="picker"' in html
 
 
 def test_index_css_has_collapsible_and_settings(tmp_path, monkeypatch):
     html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
-    # Required CSS classes from brief
+    # Required CSS hooks from the brief
     assert 'header.collapsed' in html
-    assert '.picker' in html or 'picker' in html
+    assert '.picker' in html
     assert 'headerhidden' in html
     assert 'pluginframe' in html
     assert 'titleoverlay' in html

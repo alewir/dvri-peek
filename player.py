@@ -260,7 +260,6 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .spot{display:flex;gap:0;align-items:stretch;flex:1 1 auto;min-height:0}
  .big{flex:0 0 66%;min-width:160px;display:flex;flex-direction:column;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden}
  .big .cap{flex:0 0 auto;padding:6px 12px;font-size:13px;font-weight:600;background:#141417}
- .big img{flex:1 1 auto;min-height:0;width:100%;height:100%;object-fit:contain;background:#000;display:block}
  .divider{flex:0 0 16px;margin:0 5px;cursor:col-resize;border-radius:7px;background:#3a3a42;
           display:flex;align-items:center;justify-content:center;user-select:none;color:#cbd5e1;font-size:18px;line-height:1}
  .divider:hover,.divider.drag{background:var(--accent);color:#fff}
@@ -268,7 +267,6 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .thumb{flex:1 1 0;min-height:0;position:relative;background:#000;border:2px solid var(--line);border-radius:9px;
         overflow:hidden;cursor:pointer}
  .thumb.active{border-color:var(--accent);cursor:default}
- .thumb img{width:100%;height:100%;object-fit:contain;background:#000;display:block}
  .thumb .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;
              background:linear-gradient(#000b,#0000);display:flex;justify-content:space-between;z-index:2}
  .thumb .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -278,7 +276,6 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  /* grid */
  .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));flex:1 1 auto;min-height:0;overflow:auto;align-content:start}
  .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;position:relative;aspect-ratio:16/9}
- .cell img{width:100%;display:block;aspect-ratio:16/9;object-fit:contain;background:#000}
  .cell .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;background:linear-gradient(#000b,#0000)}
  /* collapsible header */
  header.collapsed{display:none}
@@ -287,10 +284,12 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  /* settings mode */
  .thumb .picker,.cell .picker{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none}
  body.settings .thumb .picker,body.settings .cell .picker{display:block}
- .titleoverlay{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;
-   font-weight:600;background:linear-gradient(#000b,#0000);z-index:3;pointer-events:none}
+ /* title overlay: bottom caption on the active tile's filler; never covers the
+    top status row (.lbl), so the live status dot/resolution stays visible */
+ .titleoverlay{position:absolute;bottom:0;left:0;right:0;padding:4px 8px;font-size:12px;
+   font-weight:600;background:linear-gradient(#0000,#000b);z-index:3;pointer-events:none}
+ .thumb.active .lbl .tname{display:none}
  .pluginframe{width:100%;height:100%;border:0;background:#000;display:block}
- .thumb.active{outline:2px solid var(--accent);outline-offset:-2px}
  /* big pane media container */
  .bigmedia{flex:1 1 auto;min-height:0;overflow:hidden;background:#000}
  .bigmedia img{width:100%;height:100%;object-fit:contain;display:block}
@@ -408,6 +407,25 @@ function _mediaHTML(srcId,ctx){
   }
   return '<img class="cam" data-id="'+srcId+'" src="/stream/'+srcId+'">';
 }
+// Only rewrite a media container when its desired content actually changed.
+// Comparing against a stored intended-key (not el.innerHTML, which the browser
+// re-serializes) avoids needlessly tearing down + restarting live MJPEG <img>
+// streams (flicker) on every re-render.
+function setMedia(el,html){
+  if(!el) return;
+  if(el.dataset.mkey!==html){ el.innerHTML=html; el.dataset.mkey=html; }
+}
+// Build the <select> options once per SOURCES set; only update the selection.
+// Rebuilding options on every render would drop a user's open dropdown.
+function fillPicker(picker,selVal){
+  if(!picker||!SOURCES.length) return;
+  const sig=SOURCES.map(s=>s.id).join(',');
+  if(picker.dataset.sig!==sig){
+    picker.innerHTML=SOURCES.map(s=>'<option value="'+s.id+'">'+s.name+'</option>').join('');
+    picker.dataset.sig=sig;
+  }
+  if(picker.value!==(selVal||'')) picker.value=selVal||'';
+}
 // ---- tile assignments ----
 function applyAssignments(){
   document.querySelectorAll('.device').forEach(d=>{
@@ -424,12 +442,12 @@ function applyAssignments(){
       const selThumb=thumbEls.find(t=>t.dataset.source===selected)||thumbEls[0];
       if(selThumb){
         const selSrc=tiles[selThumb.dataset.slot]||selThumb.dataset.source;
-        const bigmedia=d.querySelector('#bigmedia-'+dev);
-        if(bigmedia) bigmedia.innerHTML=_mediaHTML(selSrc,'main');
+        setMedia(d.querySelector('#bigmedia-'+dev),_mediaHTML(selSrc,'main'));
         const bigcap=d.querySelector('#bigcap-'+dev);
         if(bigcap){
           const meta=SOURCES.find(s=>s.id===selSrc);
-          bigcap.textContent=meta?meta.name:((selThumb.querySelector('.tname')||{}).textContent||'');
+          const name=meta?meta.name:((selThumb.querySelector('.tname')||{}).textContent||'');
+          if(bigcap.textContent!==name) bigcap.textContent=name;
         }
       }
       thumbEls.forEach(th=>{
@@ -439,34 +457,27 @@ function applyAssignments(){
         const isActive=th.dataset.source===selected;
         th.classList.toggle('active',isActive);
         // tile media: active shows filler (or placeholder); others show assigned source
-        const mediaDiv=th.querySelector('.tmediadiv');
-        if(mediaDiv){
-          if(isActive&&filler) mediaDiv.innerHTML=_mediaHTML(filler,'filler');
-          else if(isActive) mediaDiv.innerHTML='<div class="placeholder">&#9679; Live in main view</div>';
-          else mediaDiv.innerHTML=_mediaHTML(assignedSrc,'tile');
-        }
-        // title overlay: shown on active tile to label the slot
+        let html;
+        if(isActive&&filler) html=_mediaHTML(filler,'filler');
+        else if(isActive) html='<div class="placeholder">&#9679; Live in main view</div>';
+        else html=_mediaHTML(assignedSrc,'tile');
+        setMedia(th.querySelector('.tmediadiv'),html);
+        // title overlay: shown on active tile to label the slot's original title
         const overlay=th.querySelector('.titleoverlay');
-        if(overlay) overlay.textContent=isActive?((th.querySelector('.tname')||{}).textContent||''):'';
-        // populate picker: active tile picker selects filler; others select slot source
+        if(overlay){
+          const ot=isActive?((th.querySelector('.tname')||{}).textContent||''):'';
+          if(overlay.textContent!==ot) overlay.textContent=ot;
+        }
+        // picker: active tile picker selects filler; others select slot source
         const picker=th.querySelector('.picker');
-        if(picker&&SOURCES.length>0){
-          const pickerVal=isActive?(filler||''):assignedSrc;
-          picker.innerHTML=SOURCES.map(s=>'<option value="'+s.id+'"'+(s.id===pickerVal?' selected':'')+'>'+s.name+'</option>').join('');
-          if(isActive){
-            picker.onchange=()=>{
-              if(!LAYOUT.devices[dev]) LAYOUT.devices[dev]={};
-              LAYOUT.devices[dev].filler=picker.value;
-              applyAssignments();
-            };
-          } else {
-            picker.onchange=()=>{
-              if(!LAYOUT.devices[dev]) LAYOUT.devices[dev]={};
-              if(!LAYOUT.devices[dev].tiles) LAYOUT.devices[dev].tiles={};
-              LAYOUT.devices[dev].tiles[slot]=picker.value;
-              applyAssignments();
-            };
-          }
+        if(picker){
+          fillPicker(picker,isActive?(filler||''):assignedSrc);
+          picker.onchange=isActive
+            ?()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
+                   LAYOUT.devices[dev].filler=picker.value; applyAssignments(); }
+            :()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
+                   LAYOUT.devices[dev].tiles=LAYOUT.devices[dev].tiles||{};
+                   LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); };
         }
       });
     }
@@ -474,22 +485,19 @@ function applyAssignments(){
     d.querySelectorAll('.cell[data-dev="'+dev+'"]').forEach(cell=>{
       const slot=cell.dataset.slot;
       const assignedSrc=tiles[slot]||cell.dataset.source;
-      const mediaDiv=cell.querySelector('.tmediadiv');
-      if(mediaDiv) mediaDiv.innerHTML=_mediaHTML(assignedSrc,'tile');
+      setMedia(cell.querySelector('.tmediadiv'),_mediaHTML(assignedSrc,'tile'));
       const picker=cell.querySelector('.picker');
-      if(picker&&SOURCES.length>0){
-        picker.innerHTML=SOURCES.map(s=>'<option value="'+s.id+'"'+(s.id===assignedSrc?' selected':'')+'>'+s.name+'</option>').join('');
-        picker.onchange=()=>{
-          if(!LAYOUT.devices[dev]) LAYOUT.devices[dev]={};
-          if(!LAYOUT.devices[dev].tiles) LAYOUT.devices[dev].tiles={};
-          LAYOUT.devices[dev].tiles[slot]=picker.value;
-          applyAssignments();
-        };
+      if(picker){
+        fillPicker(picker,assignedSrc);
+        picker.onchange=()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
+          LAYOUT.devices[dev].tiles=LAYOUT.devices[dev].tiles||{};
+          LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); };
       }
     });
   });
 }
 function promote(dev,lid){
+  if(LAYOUT.devices&&LAYOUT.devices[dev]&&LAYOUT.devices[dev].selected===lid) return;
   if(!LAYOUT.devices) LAYOUT.devices={};
   if(!LAYOUT.devices[dev]) LAYOUT.devices[dev]={};
   LAYOUT.devices[dev].selected=lid;
