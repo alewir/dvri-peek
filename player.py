@@ -452,7 +452,8 @@ def set_stream():
     return jsonify({"ok": True, "mode": mode})
 
 
-def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gateway=True):
+def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gateway=True,
+              plugins_dir=None, state_path=None, secrets_path=None):
     global CFG, DEVICES, REGISTRY, STORE
     here = os.path.dirname(os.path.abspath(__file__))
     config_path = config_path or os.path.join(here, "cameras.yaml")
@@ -461,10 +462,10 @@ def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gate
     pl = CFG.get("player", {})
     mode = stream_mode or pl.get("default_stream", "sub")
 
-    secrets = load_secrets(os.path.join(here, "secrets.local.yaml"))
-    REGISTRY = plugins_mod.PluginRegistry(os.path.join(here, "plugins"), secrets=secrets)
+    secrets = load_secrets(secrets_path or os.path.join(here, "secrets.local.yaml"))
+    REGISTRY = plugins_mod.PluginRegistry(plugins_dir or os.path.join(here, "plugins"), secrets=secrets)
     REGISTRY.discover()
-    STORE = layout_mod.LayoutStore(os.path.join(here, "state.local.json"))
+    STORE = layout_mod.LayoutStore(state_path or os.path.join(here, "state.local.json"))
 
     if "plugins" not in app.blueprints:
         app.register_blueprint(plugins_mod.create_plugins_blueprint(REGISTRY))
