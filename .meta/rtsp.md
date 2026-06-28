@@ -1,85 +1,131 @@
-Discovering RTSP Streams on a Local Network and Capturing in Python
-Main Takeaway
-It is possible to discover RTSP streams from cameras on your local network using network scanning techniques and to capture those streams in Python. However, automatic RTSP stream discovery is not always trivial, as most IP cameras do not broadcast their RTSP URLs openly. You typically need to identify devices on the network, probe for open ports (especially 554/tcp), and then try default RTSP paths.
+# Technical Specification — Multi-Lens XiongMai/ICSee Camera Access
 
-Python offers robust libraries for capturing and processing RTSP streams—most notably, OpenCV and FFmpeg-based wrappers.
+Status: implemented · Scope: how dvri-peek discovers, authenticates, and streams
+every lens of a XiongMai/ICSee ("Sofia" / `H264DVR`) multi-lens IP camera, and
+how those streams reach a browser.
 
-1. Discovering RTSP Streams on a Local Network
-a. Device Discovery
-Use network scanning tools to discover devices on the local network.
+---
 
-Popular Python modules: scapy, arp, socket, or external tools like nmap.
+## 1. Problem statement
 
-Target common IP camera ports like 554 (RTSP default), 80 (HTTP), 8080, 8554, etc.
+Budget multi-lens IP cameras (XiongMai OEM; apps ICSee / XMEye) advertise only
+**one** lens over standard protocols. The remaining lenses are reachable solely
+through the vendor's proprietary **DVRIP** protocol. Goal: enumerate and view
+**all** lenses with open tooling.
 
-Example device scan with nmap (command-line):
+## 2. Device fingerprint
 
-bash
-nmap -p 554 --open 192.168.1.0/24
-This finds devices with RTSP ports open.
+| Signal | Value | Meaning |
+|---|---|---|
+| RTSP `Server:` header | `H264DVR 1.0` | XiongMai/Sofia RTSP stack |
+| HTTP web UI | "Web Viewer" / `RSUI.css` | XiongMai web client |
+| Open TCP ports | `554` (RTSP), `34567` (DVRIP), `80` (HTTP) | Sofia device |
+| RTSP digest `realm` | 16-hex (e.g. `e0743359b5c18232`) | **device-unique** id; equal realms ⇒ same physical device |
+| DVRIP login reply | `{"DeviceType":"IPC","ChannelNum":N,...}` | N = lens/channel count |
 
-b. Service Identification
-After finding devices with RTSP ports open, try to connect to the RTSP service.
+Port `34567` is the strongest tell — it is the Sofia/DVRIP "NetSurveillance"
+port the mobile apps use.
 
-RTSP URLs are not standardized but often look like:
-rtsp://username:password@IP:554/path
-Common paths: /live.sdp, /mpeg4, /h264, /video, /cam/realmonitor
+## 3. Protocol analysis
 
-c. Automated Discovery Tools
-ONVIF protocol: Many modern IP cameras support ONVIF, which can expose RTSP URLs programmatically.
+### 3.1 RTSP (TCP 554) — exposes lens 1 only
+Native scheme (credentials embedded in the path):
+```
+rtsp://HOST:554/user=USER&password=PASS&channel=C&stream=S.sdp?real_stream
+   S = 0 (main) | 1 (sub)
+```
+Findings:
+- `admin` + **blank** password is commonly accepted for RTSP.
+- The `channel` value is **ignored** — `channel=1|2|3`, `/onvif1|3|5`,
+  `/cam/realmonitor?channel=N` all return **lens 1**. Verified by frame content,
+  not SPS (different lenses with identical encoder config share an SPS).
+- Codecs observed: video H.265 (HEVC), audio G.711a (PCMA).
 
-Python package onvif_zeep or onvif-py can help you discover and interact with ONVIF devices.
+### 3.2 ONVIF (TCP 8899) — not the answer
+Often disabled (port closed) or advertises a single video profile; the extra
+lenses are not represented. WS-Discovery may not respond.
 
-Simple ONVIF camera discovery with Python:
+### 3.3 DVRIP / Sofia (TCP 34567) — the lenses live here
+Binary protocol; one lens per `channel` index, **zero-based** (`0,1,2,…`).
 
-python
-from onvif import ONVIFCamera
+Login:
+- Password hash ("sofia hash"): take `md5(password)` (16 bytes); for i in 0..7,
+  `out[i] = b62[(md5[2i] + md5[2i+1]) % 62]`, where
+  `b62 = 0-9 A-Z a-z`. Empty password ⇒ `tlJwpbo6`.
+- Login packet: 20-byte header `FF 00 00 00 | sid(4 LE) | seq(4 LE) | 00 00 |
+  msgid(2 LE)=1000 | len(4 LE)` + JSON body + `\x00`:
+  `{"EncryptType":"MD5","LoginType":"DVRIP-Web","UserName":U,"PassWord":hash}`.
+- Reply JSON `Ret` codes: **100** = OK; **205** = user does not exist / bad
+  account; 203 = wrong password. `SessionID` returned on success; `ChannelNum`
+  gives the lens count.
+- **Credentials are per-device**, often an auto-generated account from the ICSee
+  app (e.g. `mnwb`/`t37c3x`) — **not** `admin`/blank and **not** the NVR login.
 
-# Replace with IP, port, username, password
-camera = ONVIFCamera('192.168.1.15', 80, 'admin', 'password')
-media_service = camera.create_media_service()
-profiles = media_service.GetProfiles()
-profile = profiles[0]
-rtsp_url = media_service.GetStreamUri({'StreamSetup': {'Stream': 'RTP-Unicast', 'Transport': {'Protocol': 'RTSP'}}, 'ProfileToken': profile.token})
-print(rtsp_url.Uri)
-2. Capturing RTSP Streams with Python
-a. Using OpenCV
-OpenCV's VideoCapture can grab frames directly from RTSP:
+Stream URL (consumed by go2rtc):
+```
+dvrip://USER:PASS@HOST:34567?channel=C&subtype=S      C = 0..N-1 ; S = 0(main)|1(sub)
+```
 
-python
-import cv2
+### 3.4 NVR relationship
+A site NVR is a **separate device** (distinct RTSP realm, own login). It does not
+necessarily carry the multi-lens camera's extra channels — those are direct on
+the camera's DVRIP.
 
-rtsp_url = 'rtsp://username:password@ip:554/stream'
-cap = cv2.VideoCapture(rtsp_url)
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
-    # Process frame (e.g., display, save)
-    cv2.imshow('RTSP Stream', frame)
-    if cv2.waitKey(1) == ord('q'):
-        break
-cap.release()
-cv2.destroyAllWindows()
-b. Using FFmpeg/PyAV
-PyAV and python-ffmpeg support more complex situations, lower-level control, or for saving/transcoding streams.
+## 4. Discovery methodology (reproducible)
+1. Subnet scan TCP `554` + `34567` → candidate Sofia devices.
+2. RTSP `OPTIONS`/`DESCRIBE` → confirm `H264DVR`; capture digest `realm`.
+3. Compare realms → collapse aliases (same device on multiple IPs / NVR vs cam).
+4. DVRIP login (try device/ICSee account) → read `ChannelNum`.
+5. Pull each `channel=0..N-1` and compare **decoded frames** to confirm distinct
+   lenses (resolution and/or content differ).
 
-Example with PyAV:
+## 5. Architecture
 
-python
-import av
+```
+ camera (DVRIP 34567, ch 0..N)
+        │  dvrip://…?channel=C&subtype=S
+        ▼
+   go2rtc  ── re-publishes each lens as RTSP on 127.0.0.1:8554/<name> ──►
+        ▼
+   OpenCV worker per lens  (decode H.264/H.265 → JPEG)
+        ▼
+   Flask  ── MJPEG per lens + tabbed spotlight/grid UI ──►  browser
+```
+- go2rtc handles the proprietary DVRIP handshake (OpenCV/ffmpeg cannot).
+- DVRIP→RTSP is a **remux** (no transcode) → no ffmpeg dependency; OpenCV's
+  bundled decoders do H.265.
+- A lens may declare an RTSP fallback; go2rtc lists `[dvrip, rtsp]` and uses the
+  first that connects.
 
-container = av.open('rtsp://username:password@ip:554/stream')
-for frame in container.decode(video=0):
-    # Process frames here
-    image = frame.to_ndarray(format='bgr24')
-3. Summary and Recommendations
-Discovery: Use network and ONVIF scanning to identify RTSP-enabled devices and streams.
+## 6. Stream model
+- Per lens go2rtc exposes `<id>` (sub) and `<id>_main` (main).
+- Player config maps a UI tile → device → lens → DVRIP `channel` (+ optional
+  `rtsp_channel`). See `cameras.example.yaml`.
+- Performance lever: previews on sub, spotlight on main (≈1 main + N sub
+  decodes).
 
-Capture: Use Python's OpenCV (cv2.VideoCapture) for frame grabbing, or PyAV/FFmpeg for more complex needs.
+## 7. Player surface (HTTP)
+| Route | Purpose |
+|---|---|
+| `/` | tabbed UI (one tab/device; spotlight or grid) |
+| `/stream/<lens>` | MJPEG (multipart/x-mixed-replace) |
+| `/snapshot/<lens>` | single JPEG |
+| `/status` | JSON: per-lens status, resolution, fps |
+| `/set_stream?mode=sub\|main` | switch stream tier |
 
-Security: Be mindful of authentication or access controls on IP cameras—many require valid login credentials.
+UI: spotlight = big pane + lens thumbnails; click promotes a lens (active lens
+shown only in the big pane), draggable split + selection persisted (localStorage).
 
-Troubleshooting: Not all cameras broadcast RTSP or allow open access; you may need to consult camera documentation for the correct stream URL structure.
+## 8. Deployment (summary)
+Player runs as a systemd service; a labwc autostart opens Chromium fullscreen.
+Full step-by-step in the project README. SD-card wear avoided: Chromium
+profile/cache in tmpfs, go2rtc log in `/tmp` (tmpfs), journald capped, no video
+recording.
 
-These steps provide a robust workflow for discovering and capturing RTSP streams of local cameras in Python—ideal for projects in computer vision, surveillance, or automation.
+## 9. Constraints & notes
+- **NAT (e.g. WSL2):** force RTP over **TCP** — UDP RTP return packets are not
+  routed back (`OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp`).
+- **Decode cost:** software H.265; a Pi 5 handles several HD streams, weaker Pis
+  should prefer sub-streams.
+- **Security:** credentials live only in the git-ignored `cameras.yaml`.
+- A `Ret:205` on DVRIP almost always means the *account* is wrong, not the host.

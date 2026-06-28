@@ -1,0 +1,16 @@
+[Unit]
+Description=dvri-peek multi-lens camera viewer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace __USER__ and __DIR__ (setup-pi.sh does this automatically)
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=/usr/bin/python3 -u __DIR__/player.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

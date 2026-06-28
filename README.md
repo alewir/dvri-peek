@@ -100,6 +100,111 @@ full annotated template). Per device you set the host, ports, credentials, a
 DVRIP `channel`. A lens may add `rtsp_channel` for an RTSP fallback. The player
 generates `go2rtc.generated.yaml` from this on every start.
 
+## Raspberry Pi kiosk deployment
+
+Run dvri-peek on a wall-mounted Raspberry Pi that boots straight into a
+fullscreen dashboard. Tested on a Pi 5 (Raspberry Pi OS / Debian 13, **labwc**
+Wayland compositor), portable to other Pis.
+
+### Quick (automated)
+
+```bash
+# on the Pi, with Desktop Autologin already enabled (raspi-config)
+sudo raspi-config            # System Options -> Boot/Auto Login -> Desktop Autologin
+git clone https://github.com/alewir/dvri-peek.git ~/dvri-peek
+cd ~/dvri-peek
+cp cameras.example.yaml cameras.yaml && nano cameras.yaml   # set IPs + credentials
+bash deploy/setup-pi.sh
+sudo reboot
+```
+
+`deploy/setup-pi.sh` installs deps, the arch-correct go2rtc, the systemd service,
+the kiosk autostart, and all the SD-card-sparing tweaks below. After reboot the
+Pi autologins and opens the dashboard fullscreen.
+
+### Manual, step by step (every aspect)
+
+1. **OS / autologin** — Raspberry Pi OS with desktop. Enable autologin to the
+   desktop: `sudo raspi-config` → *System Options → Boot/Auto Login → Desktop
+   Autologin*. Confirm: `/etc/lightdm/lightdm.conf` has `autologin-user=<you>`.
+
+2. **Dependencies (apt, not pip)** — apt packages are prebuilt for ARM and avoid
+   slow/fragile source builds (especially OpenCV on aarch64 + Python 3.13):
+   ```bash
+   sudo apt update
+   sudo apt install -y python3-opencv python3-flask python3-numpy python3-yaml chromium curl git
+   ```
+   The player then runs under the system `python3` (no venv needed on the Pi).
+
+3. **App + config**
+   ```bash
+   git clone https://github.com/alewir/dvri-peek.git ~/dvri-peek && cd ~/dvri-peek
+   cp cameras.example.yaml cameras.yaml
+   nano cameras.yaml          # hosts, channels, DVRIP/ICSee credentials
+   ```
+
+4. **go2rtc for your CPU** — pick the matching build:
+   ```bash
+   # Pi 3/4/5 64-bit OS -> arm64 ; 32-bit OS -> arm
+   curl -L -o go2rtc https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_arm64
+   chmod +x go2rtc
+   ```
+
+5. **systemd service** (player auto-starts at boot, restarts on failure). Render
+   `deploy/dvri-peek.service` with your user/path and install it:
+   ```bash
+   sed -e "s#__USER__#$(id -un)#g" -e "s#__DIR__#$HOME/dvri-peek#g" \
+     deploy/dvri-peek.service | sudo tee /etc/systemd/system/dvri-peek.service
+   sudo systemctl daemon-reload && sudo systemctl enable --now dvri-peek.service
+   ```
+
+6. **Kiosk autostart (labwc)** — keep the desktop defaults and add the kiosk
+   launcher (`kiosk.sh` waits for the player, then opens Chromium fullscreen):
+   ```bash
+   chmod +x kiosk.sh
+   mkdir -p ~/.config/labwc
+   cp /etc/xdg/labwc/autostart ~/.config/labwc/autostart 2>/dev/null || true
+   echo "/usr/bin/lwrespawn $HOME/dvri-peek/kiosk.sh &" >> ~/.config/labwc/autostart
+   ```
+   *Other compositors:* **wayfire** → add the command under `[autostart]` in
+   `~/.config/wayfire.ini`; **X11/LXDE** → add it to
+   `~/.config/lxsession/LXDE-pi/autostart` (prefix with `@`).
+
+7. **SD-card protection** (important for 24/7) — the project avoids SD wear by
+   design, but verify/enable:
+   - Chromium profile **and** cache live in `/dev/shm` (RAM) — handled by
+     `kiosk.sh`. This is the single biggest SD-writer on a kiosk.
+   - go2rtc's log goes to `/tmp`, which is **tmpfs (RAM)** on Raspberry Pi OS.
+   - Cap journald so logs can't grow unbounded:
+     ```bash
+     printf '[Journal]\nSystemMaxUse=50M\nRuntimeMaxUse=50M\n' | \
+       sudo tee /etc/systemd/journald.conf.d/cap.conf
+     sudo systemctl restart systemd-journald
+     ```
+   - The app records **no video** and writes only `go2rtc.generated.yaml` once
+     per start.
+
+8. **Disable screen blanking** so the wall display stays on:
+   ```bash
+   sudo raspi-config nonint do_blanking 1
+   ```
+
+9. **Reboot & verify**
+   ```bash
+   sudo reboot
+   # after boot, from any machine:
+   systemctl is-active dvri-peek            # -> active
+   curl -s localhost:8090/status            # -> 4 streams "online"
+   ```
+
+### Performance
+
+Software H.265 decode is the cost. A Pi 5 runs all streams in main/HD at ~1 of 4
+cores. On a Pi 4/3, set `default_stream: sub` in `cameras.yaml`, or use the
+sub-preview / HD-spotlight hybrid (previews on sub-streams, only the big pane on
+main). Manage the service with `systemctl {status,restart} dvri-peek` and view
+logs with `journalctl -u dvri-peek -f`.
+
 ## Troubleshooting
 
 - **DVRIP `Ret: 205`** → wrong/unknown DVRIP account; get the device login from the ICSee app.

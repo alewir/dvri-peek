@@ -15,3 +15,9 @@ venv/
 # Runtime / scratch
 data/
 *.log
+
+# MCP config (contains auth token) — keep local
+.mcp.json
+
+# Local Pi operational doc (host-specific + credential refs)
+.meta/raspi-setup.md
