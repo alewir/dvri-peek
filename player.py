@@ -276,10 +276,9 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .tilehead{display:none;padding:3px 8px;font-size:12px;font-weight:600;color:var(--txt);
    background:#141417;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}
  .tile.active .tilehead{display:block}
- /* active tile: title lives in the .tilehead strip — drop the .lbl gradient mask and
-    its duplicate name so the strip title (left) + status meta (right) both stay readable */
- .tile.active .lbl{background:none}
- .tile.active .tname{display:none}
+ /* active tile shows the filler + a header naming what's in the big pane; hide the
+    floating .lbl entirely so it never overlaps the header strip or the filler content */
+ .tile.active .lbl{display:none}
  .dot{width:8px;height:8px;border-radius:50%;background:#888;display:inline-block;margin-right:5px}
  .on{background:#22c55e}.off{background:#ef4444}.wait{background:#eab308}
  /* grid */
@@ -298,6 +297,13 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .picker{flex:1 1 auto;min-width:0;background:#1e1e24;color:var(--txt);border:1px solid var(--line);
          border-radius:4px;font-size:11px;padding:2px 4px;cursor:pointer}
  .pluginframe{width:100%;height:100%;border:0;background:#000;display:block}
+ /* iframes (plugins) swallow mouse events; parent-doc overlays restore click-to-promote
+    on tiles (clicks bubble to the tile's onclick) and keep the divider drag alive while
+    the cursor passes over the big-pane iframe */
+ .tile .clickcatch{position:absolute;inset:0;z-index:1;cursor:pointer}
+ .tile.active .clickcatch{cursor:default}
+ #dragshield{position:fixed;inset:0;z-index:9998;cursor:col-resize;display:none}
+ body.dragging #dragshield{display:block}
  /* big pane media container */
  .bigmedia{flex:1 1 auto;min-height:0;overflow:hidden;background:#000}
  .bigmedia img{width:100%;height:100%;object-fit:contain;display:block}
@@ -331,6 +337,7 @@ def render_spotlight(dev):
           <div class="tilehead" id="tilehead-{lid}"></div>
           <div class="lbl"><span class="tname">{lname}</span><span id="meta-{lid}" class="tmeta"><span class="dot wait"></span></span></div>
           <div class="tmediadiv" id="tmedia-{lid}">{_tile_media(lid, "tile")}</div>
+          <div class="clickcatch"></div>
           <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
         </div>"""
     return f"""
@@ -465,6 +472,8 @@ function applyAssignments(){
         const assignedSrc=tiles[slot]||defaultSrc;
         const isActive=th.dataset.source===selected;
         th.classList.toggle('active',isActive);
+        const _sm=SOURCES.find(s=>s.id===assignedSrc), _tn=th.querySelector('.tname');
+        if(_tn){const nm=_sm?_sm.name:assignedSrc; if(_tn.textContent!==nm)_tn.textContent=nm;}
         // tile media: active shows filler (or placeholder); others show assigned source
         let html;
         if(isActive&&filler) html=_mediaHTML(filler,'filler');
@@ -496,6 +505,8 @@ function applyAssignments(){
     d.querySelectorAll('.cell[data-dev="'+dev+'"]').forEach(cell=>{
       const slot=cell.dataset.slot;
       const assignedSrc=tiles[slot]||cell.dataset.source;
+      const _csm=SOURCES.find(s=>s.id===assignedSrc), _ctn=cell.querySelector('.tname');
+      if(_ctn){const nm=_csm?_csm.name:assignedSrc; if(_ctn.textContent!==nm)_ctn.textContent=nm;}
       setMedia(cell.querySelector('.tmediadiv'),_mediaHTML(assignedSrc,'tile'));
       const picker=cell.querySelector('.picker');
       if(picker){
@@ -521,14 +532,14 @@ function initDivider(dev){
   const big=sp.querySelector('.big'); const div=sp.querySelector('.divider');
   const saved=localStorage.getItem('split-'+dev); if(saved) big.style.flexBasis=saved;
   let dragging=false;
-  div.addEventListener('mousedown',e=>{dragging=true;div.classList.add('drag');document.body.style.userSelect='none';e.preventDefault();});
+  div.addEventListener('mousedown',e=>{dragging=true;div.classList.add('drag');document.body.classList.add('dragging');document.body.style.userSelect='none';e.preventDefault();});
   window.addEventListener('mousemove',e=>{
     if(!dragging)return; const r=sp.getBoundingClientRect();
     let pct=(e.clientX-r.left)/r.width*100; pct=Math.max(25,Math.min(85,pct));
     big.style.flexBasis=pct.toFixed(1)+'%';
   });
   window.addEventListener('mouseup',()=>{
-    if(!dragging)return; dragging=false; div.classList.remove('drag'); document.body.style.userSelect='';
+    if(!dragging)return; dragging=false; div.classList.remove('drag'); document.body.classList.remove('dragging'); document.body.style.userSelect='';
     try{ localStorage.setItem('split-'+dev, big.style.flexBasis); }catch(e){}
   });
 }
@@ -555,6 +566,7 @@ loadState();
             + '<header><div style="font-weight:700;margin-right:8px">&#128247; dvri-peek</div>'
             + tabs + controls + '</header>'
             + '<div id="revealbar" onclick="showHeader()" title="Show menu"></div>'
+            + '<div id="dragshield"></div>'
             + panes + script)
 
 
