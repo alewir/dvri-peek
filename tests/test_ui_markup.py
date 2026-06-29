@@ -74,4 +74,10 @@ def test_index_css_has_collapsible_and_settings(tmp_path, monkeypatch):
     assert '.picker' in html
     assert 'headerhidden' in html
     assert 'pluginframe' in html
-    assert 'titleoverlay' in html
+    assert 'tilehead' in html
+
+
+def test_active_tile_uses_header_strip_not_overlay(tmp_path, monkeypatch):
+    html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
+    assert 'class="tilehead"' in html          # title strip element exists
+    assert '.titleoverlay' not in html         # old overlapping overlay removed

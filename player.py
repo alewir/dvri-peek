@@ -264,13 +264,16 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
           display:flex;align-items:center;justify-content:center;user-select:none;color:#cbd5e1;font-size:18px;line-height:1}
  .divider:hover,.divider.drag{background:var(--accent);color:#fff}
  .thumbs{flex:1 1 0;min-width:150px;display:flex;flex-direction:column;gap:8px}
- .thumb{flex:1 1 0;min-height:0;position:relative;background:#000;border:2px solid var(--line);border-radius:9px;
-        overflow:hidden;cursor:pointer}
- .thumb.active{border-color:var(--accent);cursor:default}
- .thumb .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;
-             background:linear-gradient(#000b,#0000);display:flex;justify-content:space-between;z-index:2}
- .thumb .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-             color:#9ca3af;font-size:13px;text-align:center;padding:10px}
+ .tile{flex:1 1 0;min-height:0;position:relative;background:#000;border:2px solid var(--line);border-radius:9px;
+       overflow:hidden;cursor:pointer;display:flex;flex-direction:column}
+ .tile.active{outline:2px solid var(--accent);outline-offset:-2px;cursor:default}
+ .tile .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;
+            background:linear-gradient(#000b,#0000);display:flex;justify-content:space-between;z-index:2}
+ .tile .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+            color:#9ca3af;font-size:13px;text-align:center;padding:10px}
+ .tilehead{display:none;padding:3px 8px;font-size:12px;font-weight:600;color:var(--txt);
+   background:#141417;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}
+ .tile.active .tilehead{display:block}
  .dot{width:8px;height:8px;border-radius:50%;background:#888;display:inline-block;margin-right:5px}
  .on{background:#22c55e}.off{background:#ef4444}.wait{background:#eab308}
  /* grid */
@@ -282,13 +285,9 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  #revealbar{position:fixed;top:0;left:0;right:0;height:6px;background:#2563eb55;cursor:pointer;z-index:20;display:none}
  body.headerhidden #revealbar{display:block}
  /* settings mode */
- .thumb .picker,.cell .picker{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none}
- body.settings .thumb .picker,body.settings .cell .picker{display:block}
- /* title overlay: bottom caption on the active tile's filler; never covers the
-    top status row (.lbl), so the live status dot/resolution stays visible */
- .titleoverlay{position:absolute;bottom:0;left:0;right:0;padding:4px 8px;font-size:12px;
-   font-weight:600;background:linear-gradient(#0000,#000b);z-index:3;pointer-events:none}
- .thumb.active .lbl .tname{display:none}
+ .tile .picker,.cell .picker{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none}
+ body.settings .tile .picker,body.settings .cell .picker{display:block}
+ .tile.active .lbl .tname{display:none}
  .pluginframe{width:100%;height:100%;border:0;background:#000;display:block}
  /* big pane media container */
  .bigmedia{flex:1 1 auto;min-height:0;overflow:hidden;background:#000}
@@ -296,6 +295,7 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .bigmedia iframe{width:100%;height:100%;border:0;display:block}
  /* tile media container */
  .tmediadiv{position:absolute;inset:0;overflow:hidden}
+ .tile .tmediadiv{flex:1 1 auto;min-height:0;position:relative}
  .tmediadiv img{width:100%;height:100%;object-fit:contain;background:#000;display:block}
  .tmediadiv iframe{width:100%;height:100%;background:#000;border:0;display:block}
 </style></head><body>
@@ -318,9 +318,9 @@ def render_spotlight(dev):
     for ln in lenses:
         lid, lname = ln["id"], ln.get("name", ln["id"])
         thumbs += f"""
-        <div class="thumb" id="th-{lid}" data-lens="{lid}" data-slot="{lid}" data-source="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
+        <div class="tile" id="th-{lid}" data-lens="{lid}" data-slot="{lid}" data-source="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
+          <div class="tilehead" id="tilehead-{lid}"></div>
           <div class="lbl"><span class="tname">{lname}</span><span id="meta-{lid}"><span class="dot wait"></span></span></div>
-          <div class="titleoverlay"></div>
           <div class="tmediadiv" id="tmedia-{lid}">{_tile_media(lid, "tile")}</div>
           <select class="picker" data-slot="{lid}" data-dev="{dev['id']}"></select>
         </div>"""
@@ -433,7 +433,7 @@ function applyAssignments(){
     const devState=(LAYOUT.devices&&LAYOUT.devices[dev])||{};
     const tiles=devState.tiles||{};
     const filler=devState.filler||null;
-    const thumbEls=[...d.querySelectorAll('.thumb[data-dev="'+dev+'"]')];
+    const thumbEls=[...d.querySelectorAll('.tile[data-dev="'+dev+'"]')];
     // determine selected source (falls back to first thumb's default)
     let selected=devState.selected||null;
     if(!selected&&thumbEls.length>0) selected=thumbEls[0].dataset.source;
@@ -462,11 +462,11 @@ function applyAssignments(){
         else if(isActive) html='<div class="placeholder">&#9679; Live in main view</div>';
         else html=_mediaHTML(assignedSrc,'tile');
         setMedia(th.querySelector('.tmediadiv'),html);
-        // title overlay: shown on active tile to label the slot's original title
-        const overlay=th.querySelector('.titleoverlay');
-        if(overlay){
-          const ot=isActive?((th.querySelector('.tname')||{}).textContent||''):'';
-          if(overlay.textContent!==ot) overlay.textContent=ot;
+        // title strip: set on active tile, cleared on others
+        const headEl=document.getElementById('tilehead-'+th.dataset.slot);
+        if(headEl){
+          const ht=isActive?((th.querySelector('.tname')||{}).textContent||'')+' · in main':'';
+          if(headEl.textContent!==ht) headEl.textContent=ht;
         }
         // picker: active tile picker selects filler; others select slot source
         const picker=th.querySelector('.picker');
