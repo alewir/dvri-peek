@@ -260,7 +260,7 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .spot{display:flex;gap:0;align-items:stretch;flex:1 1 auto;min-height:0}
  .big{flex:0 0 66%;min-width:160px;display:flex;flex-direction:column;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden}
  .big .cap{flex:0 0 auto;padding:6px 12px;font-size:13px;font-weight:600;background:#141417}
- .divider{flex:0 0 16px;margin:0 5px;cursor:col-resize;border-radius:7px;background:#3a3a42;
+ .divider{flex:0 0 16px;margin:0 5px;cursor:col-resize;border-radius:7px;background:#3a3a42;touch-action:none;
           display:flex;align-items:center;justify-content:center;user-select:none;color:#cbd5e1;font-size:18px;line-height:1}
  .divider:hover,.divider.drag{background:var(--accent);color:#fff}
  .thumbs{flex:1 1 0;min-width:150px;display:flex;flex-direction:column;gap:8px}
@@ -288,7 +288,9 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;aspect-ratio:16/9}
  /* collapsible header */
  header.collapsed{display:none}
- #revealbar{position:fixed;top:0;left:0;right:0;height:6px;background:#2563eb55;cursor:pointer;z-index:20;display:none}
+ /* thin 6px visual accent (::before) inside a taller transparent ~24px touch target */
+ #revealbar{position:fixed;top:0;left:0;right:0;height:24px;background:transparent;cursor:pointer;z-index:20;display:none}
+ #revealbar::before{content:"";position:absolute;top:0;left:0;right:0;height:6px;background:#2563eb55}
  body.headerhidden #revealbar{display:block}
  /* settings mode */
  .picker-wrap{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none;
@@ -298,13 +300,11 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .picker{flex:1 1 auto;min-width:0;background:#1e1e24;color:var(--txt);border:1px solid var(--line);
          border-radius:4px;font-size:11px;padding:2px 4px;cursor:pointer}
  .pluginframe{width:100%;height:100%;border:0;background:#000;display:block}
- /* iframes (plugins) swallow mouse events; parent-doc overlays restore click-to-promote
-    on tiles (clicks bubble to the tile's onclick) and keep the divider drag alive while
-    the cursor passes over the big-pane iframe */
+ /* iframes (plugins) swallow mouse events; a parent-doc overlay restores click-to-promote
+    on tiles (clicks bubble to the tile's onclick). The divider uses pointer capture, so
+    pointermove is routed to it even over the big-pane iframe — no drag shield needed. */
  .tile .clickcatch{position:absolute;inset:0;z-index:1;cursor:pointer}
  .tile.active .clickcatch{cursor:default}
- #dragshield{position:fixed;inset:0;z-index:9998;cursor:col-resize;display:none}
- body.dragging #dragshield{display:block}
  /* big pane media container */
  .bigmedia{flex:1 1 auto;min-height:0;overflow:hidden;background:#000}
  .bigmedia img{width:100%;height:100%;object-fit:contain;display:block}
@@ -559,17 +559,28 @@ function promote(dev,lid){
 function initDivider(dev){
   const sp=document.getElementById('spot-'+dev); if(!sp) return;
   const big=sp.querySelector('.big'); const div=sp.querySelector('.divider');
-  const saved=localStorage.getItem('split-'+dev); if(saved) big.style.flexBasis=saved;
+  // restore the split from server-side layout state (per device), not browser storage
+  const saved=LAYOUT.devices&&LAYOUT.devices[dev]&&LAYOUT.devices[dev].split;
+  if(saved) big.style.flexBasis=saved;
   let dragging=false;
-  div.addEventListener('mousedown',e=>{dragging=true;div.classList.add('drag');document.body.classList.add('dragging');document.body.style.userSelect='none';e.preventDefault();});
-  window.addEventListener('mousemove',e=>{
+  // Pointer events (mouse AND touch). setPointerCapture routes every subsequent
+  // pointermove/up to the divider — even while the cursor is over the big-pane
+  // iframe — so the iframe can no longer eat the drag (no drag-shield overlay needed).
+  div.addEventListener('pointerdown',e=>{dragging=true;div.classList.add('drag');
+    div.setPointerCapture(e.pointerId);document.body.style.userSelect='none';e.preventDefault();});
+  div.addEventListener('pointermove',e=>{
     if(!dragging)return; const r=sp.getBoundingClientRect();
-    let pct=(e.clientX-r.left)/r.width*100; pct=Math.max(25,Math.min(85,pct));
+    // width-aware ceiling: keep the thumbnail column (150px min) + divider box (26px:
+    // 16 flex-basis + 2×5 margin) on-screen so its status dots/res/fps are never clipped
+    const maxPct=(r.width-150-26)/r.width*100;
+    let pct=(e.clientX-r.left)/r.width*100; pct=Math.max(25,Math.min(Math.min(85,maxPct),pct));
     big.style.flexBasis=pct.toFixed(1)+'%';
   });
-  window.addEventListener('mouseup',()=>{
-    if(!dragging)return; dragging=false; div.classList.remove('drag'); document.body.classList.remove('dragging'); document.body.style.userSelect='';
-    try{ localStorage.setItem('split-'+dev, big.style.flexBasis); }catch(e){}
+  div.addEventListener('pointerup',e=>{
+    if(!dragging)return; dragging=false; div.classList.remove('drag'); document.body.style.userSelect='';
+    try{ div.releasePointerCapture(e.pointerId); }catch(_){}
+    LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
+    LAYOUT.devices[dev].split=big.style.flexBasis; saveLayout();
   });
 }
 function syncStreams(main){
@@ -601,7 +612,6 @@ loadState();
             + '<header><div style="font-weight:700;margin-right:8px">&#128247; dvri-peek</div>'
             + tabs + controls + '</header>'
             + '<div id="revealbar" onclick="showHeader()" title="Show menu"></div>'
-            + '<div id="dragshield"></div>'
             + panes + script)
 
 

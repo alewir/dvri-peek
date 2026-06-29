@@ -7,7 +7,10 @@
  #wrap{height:100%;display:flex;flex-direction:column}
 
  /* ── agenda (tile / filler) ───────────────────────── */
- .agenda{height:100%;overflow:auto;padding:5px 0}
+ /* overflow:hidden (not auto): the small preview shows a fixed few items that fit the
+    tile, so there is no scrollbar to fight the parent .clickcatch click-to-promote
+    overlay. The big month/week view (#cal-body) keeps its own scrolling. */
+ .agenda{height:100%;overflow:hidden;padding:5px 0}
  .ev{display:flex;align-items:center;gap:0;padding:4px 10px;
    border-bottom:1px solid #ffffff0d}
  /* colored dot — inline-block so it renders inside chips too */
@@ -211,7 +214,9 @@ function render(){
 }
 
 function renderAgenda(){
-  const max=12, up=EVENTS.filter(e=>new Date(e.end||e.start)>=NOW).slice(0,max);
+  // small preview: a fixed few upcoming items that FIT the tile (no scrollbar — the tile
+  // is clickable end-to-end to promote it; the big month/week view shows everything)
+  const max=5, up=EVENTS.filter(e=>new Date(e.end||e.start)>=NOW).slice(0,max);
   const a=document.getElementById("agenda");
   if(!up.length){a.innerHTML='<div class="err" style="opacity:.6">No upcoming events</div>';return;}
   a.innerHTML=up.map(e=>{
