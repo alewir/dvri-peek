@@ -121,8 +121,13 @@ function sameDay(a,b){return a.getFullYear()==b.getFullYear()&&a.getMonth()==b.g
 // (Plain floor(getTime()/MS_DAY) is UTC-bucketed and misplaces timed events by a
 //  day in any timezone east of UTC — the grid is built on local dates.)
 function dnum(d){return Math.floor((d.getTime()-d.getTimezoneOffset()*60000)/MS_DAY);}
-function esc(s){return (s||"").replace(/[<>&]/g,"");}
+// HTML-encode for safe interpolation into innerHTML strings. Use ONLY when building
+// innerHTML; NEVER for textContent / DOM-property assignments (which don't parse HTML).
+function esc(s){return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function fmtTime(e){if(e.allday)return"all day";return new Date(e.start).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});}
+// Route errors to whichever container is visible for this ctx (#agenda is hidden in main).
+function showErr(msg){const t=ctx==="main"?document.getElementById("cal-body"):document.getElementById("agenda");
+  t.innerHTML='<div class="err">'+esc(msg)+'</div>';}
 
 // pure helpers (also asserted present by the markup test)
 function splitSpanByWeek(startIdx,endIdxExcl,weekStartIdx){
@@ -154,11 +159,11 @@ function assignLanes(items){
 async function load(){
   try{
     const d=await (await fetch("/plugin/calendar/data")).json();
-    if(d.error){document.getElementById("agenda").innerHTML='<div class="err">'+esc(d.error)+'</div>';return;}
+    if(d.error){showErr(d.error);return;}
     EVENTS=(d.events||[]).filter(e=>e&&e.start);
     if(EVENTS.length){WIN0=new Date(EVENTS[0].start);WIN1=new Date(EVENTS[EVENTS.length-1].start);}
     render();
-  }catch(e){document.getElementById("agenda").innerHTML='<div class="err">calendar offline</div>';}
+  }catch(e){showErr("calendar offline");}
 }
 
 function render(){
@@ -173,7 +178,7 @@ function renderAgenda(){
   if(!up.length){a.innerHTML='<div class="err" style="opacity:.6">No upcoming events</div>';return;}
   a.innerHTML=up.map(e=>{
     const dk=new Date(e.start).toLocaleDateString([], {weekday:"short",day:"numeric",month:"short"});
-    return '<div class="ev"><span class="dot" style="background:'+e.color+'"></span>'+
+    return '<div class="ev"><span class="dot" style="background:'+esc(e.color)+'"></span>'+
       '<span class="when">'+dk+' '+fmtTime(e)+'</span><span class="title">'+esc(e.title)+'</span></div>';
   }).join("");
 }
@@ -187,9 +192,9 @@ function renderMonth(){
 
   // spanning events: all-day OR timed multi-day. Coverage is an EXCLUSIVE day-index
   // range [s, eExcl): all-day end is already exclusive; timed end is inclusive → +1.
-  const spans=EVENTS.filter(e=>e.allday || (dnum(new Date(e.end))>dnum(new Date(e.start))))
+  const spans=EVENTS.filter(e=>e.allday || (dnum(new Date(e.end||e.start))>dnum(new Date(e.start))))
     .map(e=>{const s=dnum(new Date(e.start));
-            let eend=dnum(new Date(e.end)); if(!e.allday) eend+=1;
+            let eend=dnum(new Date(e.end||e.start)); if(!e.allday) eend+=1;   // end-less → single day
             return {e,s,eExcl:eend};})
     .filter(x=>x.eExcl>weekStartIdx && x.s<gridEndIdx);
   // Global lane assignment (clamped to the visible window) so a multi-week event
@@ -205,7 +210,7 @@ function renderMonth(){
 
   // timed single-day events bucketed by grid day index
   const byCell={};
-  EVENTS.filter(e=>!e.allday && dnum(new Date(e.end))===dnum(new Date(e.start))).forEach(e=>{
+  EVENTS.filter(e=>!e.allday && dnum(new Date(e.end||e.start))===dnum(new Date(e.start))).forEach(e=>{
     const idx=dnum(new Date(e.start))-weekStartIdx; if(idx<0||idx>=42)return;
     (byCell[idx]=byCell[idx]||[]).push(e);
   });
@@ -232,7 +237,7 @@ function renderMonth(){
       if(list){
         list.slice(0,3).forEach(e=>{const ch=document.createElement("div"); ch.className="chip";
           ch.style.background=e.color+"33";
-          ch.innerHTML='<span class="dot" style="background:'+e.color+'"></span> '+fmtTime(e)+' '+esc(e.title);
+          ch.innerHTML='<span class="dot" style="background:'+esc(e.color)+'"></span> '+fmtTime(e)+' '+esc(e.title);
           cell.appendChild(ch);});
         if(list.length>3){const m=document.createElement("div"); m.className="more"; m.textContent="+"+(list.length-3)+" more"; cell.appendChild(m);}
       }
@@ -244,7 +249,7 @@ function renderMonth(){
         bar.style.background=s.e.color;
         bar.style.gridColumn=(s.col0+1)+" / "+(s.col1+2);   // grid item → truly spans columns
         bar.style.gridRow=(s.lane+1);
-        bar.textContent=esc(s.e.title);
+        bar.textContent=s.e.title;   // textContent doesn't parse HTML — never esc() here
         layer.appendChild(bar);});
       row.appendChild(layer);
     }
