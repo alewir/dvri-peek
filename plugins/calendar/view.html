@@ -1,6 +1,7 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Calendar</title>
 <style>
  /* ── base ─────────────────────────────────────────── */
+ *{box-sizing:border-box}
  html,body{margin:0;height:100%;background:#0e0e10;color:#e4e4e7;overflow:hidden;
    font-family:system-ui,Segoe UI,Arial,sans-serif;font-variant-numeric:tabular-nums}
  #wrap{height:100%;display:flex;flex-direction:column}
@@ -40,40 +41,55 @@
  body[data-ctx="main"] .agenda{display:none}
 
  /* ── month grid ───────────────────────────────────── */
- /* 1px gaps act as grid lines without fighting border-collapse */
- .cal-month{display:grid;grid-template-columns:repeat(7,1fr);
-   grid-template-rows:20px repeat(6,1fr);height:100%;
-   gap:1px;background:#ffffff0a}
- /* day-of-week header row */
+ /* flex column of one header row + six week rows */
+ .cal-month{display:flex;flex-direction:column;height:100%}
+ /* day-of-week header — own 7-col grid, column-aligned with the week rows */
+ .cal-dowrow{display:grid;grid-template-columns:repeat(7,1fr);
+   flex:0 0 auto;border-bottom:1px solid #ffffff1c}
  .cal-dow{font-size:10px;letter-spacing:.08em;text-transform:uppercase;
-   color:#6b7280;padding:2px 5px;background:#0e0e10;
-   display:flex;align-items:center}
- /* calendar cells */
- .cal-cell{background:#0e0e10;padding:3px 4px 2px;overflow:hidden;
-   min-height:0;display:flex;flex-direction:column}
+   color:#6b7280;padding:3px 6px}
+ /* one row per week — positioning context for its absolute span overlay */
+ .cal-weekrow{position:relative;flex:1 1 0;min-height:0;overflow:hidden;
+   display:grid;grid-template-columns:repeat(7,1fr)}
+ /* day cell — grid item: date number, reserved span gap, then timed chips */
+ .cal-cell{position:relative;padding:2px 3px;overflow:hidden;min-height:0;
+   display:flex;flex-direction:column;
+   border-right:1px solid #ffffff10;border-bottom:1px solid #ffffff10}
  .cal-cell.dim .cal-date{opacity:.25;font-weight:400}
- .cal-cell.dim .chip,.cal-cell.dim .spanbar{opacity:.35}
- /* today — slow breathing glow (the signature element) */
+ .cal-cell.dim .chip{opacity:.4}
+ /* today — slow breathing glow (the signature element); inset so the
+    weekrow overflow:hidden never clips it */
  @keyframes today-pulse{
-   0%,100%{box-shadow:inset 0 0 0 1px #2563eb,0 0 5px #2563eb28}
-   50%    {box-shadow:inset 0 0 0 1px #3b82f6,0 0 12px #3b82f645}
+   0%,100%{box-shadow:inset 0 0 0 1px #2563eb,inset 0 0 6px #2563eb24}
+   50%    {box-shadow:inset 0 0 0 1px #3b82f6,inset 0 0 14px #3b82f644}
  }
  .cal-cell.today{animation:today-pulse 4s ease-in-out infinite}
  .cal-cell.today .cal-date{color:#60a5fa;font-weight:700}
  @media(prefers-reduced-motion:reduce){
    .cal-cell.today{animation:none;box-shadow:inset 0 0 0 1px #2563eb}
  }
- /* day number — larger for readability at distance */
- .cal-date{font-size:13px;font-weight:600;line-height:1.15;color:#c4c4c8;margin-bottom:1px}
+ /* day number — fixed height so the span overlay aligns directly below it */
+ .cal-date{font-size:12px;font-weight:600;line-height:16px;height:16px;
+   color:#c4c4c8;flex:0 0 auto}
+ /* in-flow spacer reserving vertical room for the absolute span overlay,
+    so timed chips never collide with spanning bars */
+ .cal-spanspace{flex:0 0 auto}
+ /* span overlay — its OWN 7-col grid; bars are grid items here, which is
+    what lets grid-column actually span columns (the prior bug) */
+ .cal-spanlayer{position:absolute;left:0;right:0;top:var(--date-h);
+   display:grid;grid-template-columns:repeat(7,1fr);
+   grid-auto-rows:var(--bar-h);column-gap:0;row-gap:var(--bar-gap);
+   pointer-events:none}
+ /* spanning bars (multi-day / all-day) — grid items of the overlay */
+ .spanbar{font-size:10px;font-weight:600;border-radius:3px;padding:0 6px;
+   margin:0 1px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+   height:var(--bar-h);line-height:var(--bar-h);
+   box-shadow:0 1px 2px #00000040}
  /* event chips (timed single-day) */
  .chip{font-size:10px;font-weight:500;border-radius:3px;padding:1px 4px;
    margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
    line-height:14px}
  .chip .dot{width:5px;height:5px;flex:0 0 5px;margin-right:3px}
- /* spanning bars (multi-day / all-day) */
- .spanbar{font-size:10px;font-weight:500;border-radius:3px;padding:0 5px;
-   color:#fff;white-space:nowrap;overflow:hidden;line-height:15px;
-   margin-top:1px;opacity:.92}
  /* overflow label */
  .more{font-size:9px;opacity:.4;margin-top:1px;padding-left:2px}
 </style></head><body>
@@ -90,13 +106,21 @@
 const ctx=new URLSearchParams(location.search).get("ctx")||"tile";
 document.body.dataset.ctx=ctx;
 const MS_DAY=86400000;
+// span-bar geometry (px) — single source; pushed to CSS as custom props so the
+// in-flow chip spacer and the absolute span overlay stay pixel-aligned.
+const BAR_H=15, BAR_GAP=2, DATE_H=18;   // DATE_H = cell padding-top(2) + date height(16)
 let EVENTS=[], NOW=new Date(), CUR=startOfMonth(new Date()), MODE=localStorage.getItem("cal.viewmode")||"month";
 let WIN0=null, WIN1=null;   // fetched window bounds (Date)
 
 function startOfMonth(d){return new Date(d.getFullYear(),d.getMonth(),1);}
 function startOfWeek(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);x.setHours(0,0,0,0);return x;}
 function sameDay(a,b){return a.getFullYear()==b.getFullYear()&&a.getMonth()==b.getMonth()&&a.getDate()==b.getDate();}
-function dnum(d){return Math.floor(d.getTime()/MS_DAY);}   // day index (local midnight bucket)
+// LOCAL calendar-day index. getTime() is UTC; subtracting the date's own tz offset
+// yields wall-clock ms, so all-day (local-midnight) and timed events on the same
+// local date bucket identically and align with the local-midnight-stepped grid.
+// (Plain floor(getTime()/MS_DAY) is UTC-bucketed and misplaces timed events by a
+//  day in any timezone east of UTC — the grid is built on local dates.)
+function dnum(d){return Math.floor((d.getTime()-d.getTimezoneOffset()*60000)/MS_DAY);}
 function esc(s){return (s||"").replace(/[<>&]/g,"");}
 function fmtTime(e){if(e.allday)return"all day";return new Date(e.start).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});}
 
@@ -157,55 +181,76 @@ function renderAgenda(){
 function renderMonth(){
   const body=document.getElementById("cal-body");
   const first=startOfMonth(CUR), gridStart=startOfWeek(first);
-  const weekStartIdx=dnum(gridStart);
+  const weekStartIdx=dnum(gridStart), gridEndIdx=weekStartIdx+42;   // exclusive
   document.getElementById("cal-label").textContent=CUR.toLocaleDateString([], {month:"long",year:"numeric"});
-  // 6 weeks x 7
-  let html='<div class="cal-month">';
   const dows=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
-  // header row of weekday names
-  html+=dows.map(n=>'<div class="cal-dow">'+n+'</div>').join("");
-  const cells=[];
-  for(let i=0;i<42;i++){
-    const d=new Date(gridStart.getTime()+i*MS_DAY);
-    cells.push(d);
-    const cls=(d.getMonth()!=CUR.getMonth()?"dim ":"")+(sameDay(d,NOW)?"today":"");
-    html+='<div class="cal-cell '+cls+'" data-idx="'+i+'"><div class="cal-date">'+d.getDate()+'</div></div>';
-  }
-  html+='</div>';
-  body.innerHTML=html;
-  const monthEl=body.querySelector(".cal-month");
-  // multi-day / all-day spanning bars (lane-stacked, week-wrapped)
+
+  // spanning events: all-day OR timed multi-day. Coverage is an EXCLUSIVE day-index
+  // range [s, eExcl): all-day end is already exclusive; timed end is inclusive → +1.
   const spans=EVENTS.filter(e=>e.allday || (dnum(new Date(e.end))>dnum(new Date(e.start))))
     .map(e=>{const s=dnum(new Date(e.start));
-            let eend=dnum(new Date(e.end)); if(!e.allday) eend+=1;   // timed inclusive -> exclusive
+            let eend=dnum(new Date(e.end)); if(!e.allday) eend+=1;
             return {e,s,eExcl:eend};})
-    .filter(x=>x.eExcl>weekStartIdx && x.s<weekStartIdx+42);
-  const lanes=assignLanes(spans.map(x=>({s:Math.max(x.s,weekStartIdx),e:Math.min(x.eExcl,weekStartIdx+42)})));
-  const cellEls=[...monthEl.querySelectorAll(".cal-cell")];
+    .filter(x=>x.eExcl>weekStartIdx && x.s<gridEndIdx);
+  // Global lane assignment (clamped to the visible window) so a multi-week event
+  // keeps ONE vertical lane across the week rows it spans.
+  const laneOf=assignLanes(spans.map(x=>({s:Math.max(x.s,weekStartIdx),e:Math.min(x.eExcl,gridEndIdx)})));
+  // Bucket span segments per week row via splitSpanByWeek.
+  const weekSegs=[[],[],[],[],[],[]];
   spans.forEach((x,i)=>{
-    for(const seg of splitSpanByWeek(Math.max(x.s,weekStartIdx),Math.min(x.eExcl,weekStartIdx+42),weekStartIdx)){
-      const anchor=cellEls[seg.row*7+seg.col0];
-      const bar=document.createElement("div");
-      bar.className="spanbar"; bar.style.background=x.e.color;
-      bar.style.gridColumn=(seg.col0+1)+" / "+(seg.col1+2);
-      bar.textContent=esc(x.e.title);
-      anchor.appendChild(bar);
-    }
+    const cs=Math.max(x.s,weekStartIdx), ce=Math.min(x.eExcl,gridEndIdx);
+    for(const seg of splitSpanByWeek(cs,ce,weekStartIdx)) weekSegs[seg.row].push({...seg,lane:laneOf[i],e:x.e});
   });
-  // timed (single-day) events as chips, with +N more
+  const weekMaxLane=weekSegs.map(segs=>segs.reduce((m,s)=>Math.max(m,s.lane),-1));
+
+  // timed single-day events bucketed by grid day index
   const byCell={};
   EVENTS.filter(e=>!e.allday && dnum(new Date(e.end))===dnum(new Date(e.start))).forEach(e=>{
     const idx=dnum(new Date(e.start))-weekStartIdx; if(idx<0||idx>=42)return;
     (byCell[idx]=byCell[idx]||[]).push(e);
   });
-  Object.entries(byCell).forEach(([idx,list])=>{
-    const cell=cellEls[idx]; const show=list.slice(0,3);
-    show.forEach(e=>{const c=document.createElement("div");c.className="chip";
-      c.style.background=e.color+"33";
-      c.innerHTML='<span class="dot" style="background:'+e.color+'"></span> '+fmtTime(e)+' '+esc(e.title);
-      cell.appendChild(c);});
-    if(list.length>3){const m=document.createElement("div");m.className="more";m.textContent="+"+(list.length-3)+" more";cell.appendChild(m);}
-  });
+
+  const month=document.createElement("div"); month.className="cal-month";
+  month.style.setProperty("--bar-h",BAR_H+"px");
+  month.style.setProperty("--bar-gap",BAR_GAP+"px");
+  month.style.setProperty("--date-h",DATE_H+"px");
+  const dowRow=document.createElement("div"); dowRow.className="cal-dowrow";
+  dows.forEach(n=>{const c=document.createElement("div");c.className="cal-dow";c.textContent=n;dowRow.appendChild(c);});
+  month.appendChild(dowRow);
+
+  for(let w=0;w<6;w++){
+    const row=document.createElement("div"); row.className="cal-weekrow";
+    const reservedH=(weekMaxLane[w]+1)*(BAR_H+BAR_GAP);   // 0 when this week has no spans
+    for(let c=0;c<7;c++){
+      const idx=w*7+c, d=new Date(gridStart.getTime()+idx*MS_DAY);
+      const cell=document.createElement("div");
+      cell.className="cal-cell"+(d.getMonth()!=CUR.getMonth()?" dim":"")+(sameDay(d,NOW)?" today":"");
+      cell.dataset.idx=idx;
+      const dn=document.createElement("div"); dn.className="cal-date"; dn.textContent=d.getDate(); cell.appendChild(dn);
+      if(reservedH>0){const sp=document.createElement("div"); sp.className="cal-spanspace"; sp.style.height=reservedH+"px"; cell.appendChild(sp);}
+      const list=byCell[idx];
+      if(list){
+        list.slice(0,3).forEach(e=>{const ch=document.createElement("div"); ch.className="chip";
+          ch.style.background=e.color+"33";
+          ch.innerHTML='<span class="dot" style="background:'+e.color+'"></span> '+fmtTime(e)+' '+esc(e.title);
+          cell.appendChild(ch);});
+        if(list.length>3){const m=document.createElement("div"); m.className="more"; m.textContent="+"+(list.length-3)+" more"; cell.appendChild(m);}
+      }
+      row.appendChild(cell);
+    }
+    if(weekSegs[w].length){
+      const layer=document.createElement("div"); layer.className="cal-spanlayer";
+      weekSegs[w].forEach(s=>{const bar=document.createElement("div"); bar.className="spanbar";
+        bar.style.background=s.e.color;
+        bar.style.gridColumn=(s.col0+1)+" / "+(s.col1+2);   // grid item → truly spans columns
+        bar.style.gridRow=(s.lane+1);
+        bar.textContent=esc(s.e.title);
+        layer.appendChild(bar);});
+      row.appendChild(layer);
+    }
+    month.appendChild(row);
+  }
+  body.replaceChildren(month);
   updateNavBounds();
 }
 
