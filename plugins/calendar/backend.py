@@ -149,9 +149,10 @@ def fetch(config, now=None):
             errors.append({"source": src.get("name", ""), "error": str(e)})
     merged.sort(key=lambda e: e["_sortkey"])
     truncated = len(merged) > cap
-    for e in merged:
+    events = merged[:cap]
+    for e in events:
         del e["_sortkey"]
-    out = {"events": merged[:cap], "generated": now.isoformat()}
+    out = {"events": events, "generated": now.isoformat()}
     if truncated:
         out["truncated"] = True
     if errors:

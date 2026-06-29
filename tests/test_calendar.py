@@ -33,7 +33,7 @@ def test_fetch_merges_sorts_colors(monkeypatch):
     feeds = {"A": Path("tests/fixtures/cal_a.ics").read_text(),
              "B": Path("tests/fixtures/cal_b.ics").read_text()}
     monkeypatch.setattr(b, "_http_get", lambda url: feeds[url])
-    out = b.fetch({"max_events": 10, "lookahead_days": 30,
+    out = b.fetch({"lookahead_days": 30,
                    "sources": [{"name": "A", "color": "#111", "ics_url": "A"},
                                {"name": "B", "color": "#222", "ics_url": "B"}]},
                   now=datetime(2026, 6, 28, tzinfo=timezone.utc))
@@ -41,7 +41,7 @@ def test_fetch_merges_sorts_colors(monkeypatch):
     starts = [e["start"] for e in out["events"]]
     assert starts == sorted(starts)                 # merged + sorted
     assert any(e["source"] == "B" and e["color"] == "#222" for e in out["events"])
-    assert len(out["events"]) <= 10
+    assert len(out["events"]) == 5                  # cal_a(2) + cal_b DAILY COUNT=3 within 30d
 
 def test_fetch_bad_url_is_graceful(monkeypatch):
     b = _backend()
@@ -98,12 +98,13 @@ def test_fetch_caps_at_max_events_grid(monkeypatch):
     for i in range(50):
         body += ["BEGIN:VEVENT", f"UID:e{i}", "SUMMARY:E",
                  "DTSTART:20260701T090000Z", "DTEND:20260701T093000Z",
-                 f"RRULE:FREQ=DAILY;COUNT=20", "END:VEVENT"]  # 50*20 = 1000 occurrences
+                 "RRULE:FREQ=DAILY;COUNT=20", "END:VEVENT"]  # 50*20 = 1000 occurrences
     body.append("END:VCALENDAR")
     monkeypatch.setattr(b, "_http_get", lambda url: "\r\n".join(body))
     out = b.fetch({"max_events_grid": 100, "sources": [{"name": "A", "color": "#1", "ics_url": "A"}]},
                   now=datetime(2026, 6, 28, tzinfo=timezone.utc))
     assert len(out["events"]) == 100
+    assert out["truncated"] is True                 # cap flag is the spec-visible contract
 
 def test_allday_multiday_exclusive_end():
     b = _backend()
