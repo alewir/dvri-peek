@@ -268,7 +268,9 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
        overflow:hidden;cursor:pointer;display:flex;flex-direction:column}
  .tile.active{outline:2px solid var(--accent);outline-offset:-2px;cursor:default}
  .tile .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;
-            background:linear-gradient(#000b,#0000);display:flex;justify-content:space-between;z-index:2}
+            background:linear-gradient(#000c,#0000);display:flex;align-items:center;gap:6px;z-index:2}
+ .tname{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .tmeta{flex:0 0 auto;white-space:nowrap;font-size:11px}
  .tile .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
             color:#9ca3af;font-size:13px;text-align:center;padding:10px}
  .tilehead{display:none;padding:3px 8px;font-size:12px;font-weight:600;color:var(--txt);
@@ -283,14 +285,18 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  /* grid */
  .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));flex:1 1 auto;min-height:0;overflow:auto;align-content:start}
  .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;position:relative;aspect-ratio:16/9}
- .cell .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;background:linear-gradient(#000b,#0000)}
+ .cell .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;background:linear-gradient(#000c,#0000);display:flex;align-items:center;gap:6px}
  /* collapsible header */
  header.collapsed{display:none}
  #revealbar{position:fixed;top:0;left:0;right:0;height:6px;background:#2563eb55;cursor:pointer;z-index:20;display:none}
  body.headerhidden #revealbar{display:block}
  /* settings mode */
- .tile .picker,.cell .picker{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none}
- body.settings .tile .picker,body.settings .cell .picker{display:block}
+ .picker-wrap{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none;
+              background:rgba(14,14,16,.88);border-radius:5px;padding:3px 6px}
+ body.settings .tile .picker-wrap,body.settings .cell .picker-wrap{display:flex;align-items:center;gap:5px}
+ .picker-lbl{font-size:10px;font-weight:700;color:#9ca3af;white-space:nowrap;flex:0 0 auto;text-transform:uppercase;letter-spacing:.04em}
+ .picker{flex:1 1 auto;min-width:0;background:#1e1e24;color:var(--txt);border:1px solid var(--line);
+         border-radius:4px;font-size:11px;padding:2px 4px;cursor:pointer}
  .pluginframe{width:100%;height:100%;border:0;background:#000;display:block}
  /* big pane media container */
  .bigmedia{flex:1 1 auto;min-height:0;overflow:hidden;background:#000}
@@ -323,9 +329,9 @@ def render_spotlight(dev):
         thumbs += f"""
         <div class="tile" id="th-{lid}" data-lens="{lid}" data-slot="{lid}" data-source="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
           <div class="tilehead" id="tilehead-{lid}"></div>
-          <div class="lbl"><span class="tname">{lname}</span><span id="meta-{lid}"><span class="dot wait"></span></span></div>
+          <div class="lbl"><span class="tname">{lname}</span><span id="meta-{lid}" class="tmeta"><span class="dot wait"></span></span></div>
           <div class="tmediadiv" id="tmedia-{lid}">{_tile_media(lid, "tile")}</div>
-          <select class="picker" data-slot="{lid}" data-dev="{dev['id']}"></select>
+          <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
         </div>"""
     return f"""
     <div class="spot" id="spot-{dev['id']}">
@@ -344,9 +350,9 @@ def render_grid(dev):
         lid, lname = ln["id"], ln.get("name", ln["id"])
         cells += f"""
         <div class="cell" data-source="{lid}" data-slot="{lid}" data-dev="{dev['id']}">
-          <div class="lbl"><span>{lname}</span> <span id="meta-{lid}"><span class="dot wait"></span></span></div>
+          <div class="lbl"><span class="tname">{lname}</span><span id="meta-{lid}" class="tmeta"><span class="dot wait"></span></span></div>
           <div class="tmediadiv">{_tile_media(lid, "tile")}</div>
-          <select class="picker" data-slot="{lid}" data-dev="{dev['id']}"></select>
+          <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
         </div>"""
     return f'<div class="grid">{cells}</div>'
 
@@ -472,6 +478,8 @@ function applyAssignments(){
           if(headEl.textContent!==ht) headEl.textContent=ht;
         }
         // picker: active tile picker selects filler; others select slot source
+        const pickerLbl=th.querySelector('.picker-lbl');
+        if(pickerLbl) pickerLbl.textContent=isActive?'Filler:':'Show:';
         const picker=th.querySelector('.picker');
         if(picker){
           fillPicker(picker,isActive?(filler||''):assignedSrc);
@@ -500,6 +508,7 @@ function applyAssignments(){
   });
 }
 function promote(dev,lid){
+  if(document.body.classList.contains('settings')) return;
   if(LAYOUT.devices&&LAYOUT.devices[dev]&&LAYOUT.devices[dev].selected===lid) return;
   if(!LAYOUT.devices) LAYOUT.devices={};
   if(!LAYOUT.devices[dev]) LAYOUT.devices[dev]={};
