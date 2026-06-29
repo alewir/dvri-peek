@@ -291,7 +291,6 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  /* settings mode */
  .tile .picker,.cell .picker{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none}
  body.settings .tile .picker,body.settings .cell .picker{display:block}
- .tile.active .lbl .tname{display:none}
  .pluginframe{width:100%;height:100%;border:0;background:#000;display:block}
  /* big pane media container */
  .bigmedia{flex:1 1 auto;min-height:0;overflow:hidden;background:#000}

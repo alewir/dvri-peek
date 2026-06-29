@@ -143,8 +143,10 @@ const MS_DAY=86400000;
 // span-bar geometry (px) — single source; pushed to CSS as custom props so the
 // in-flow chip spacer and the absolute span overlay stay pixel-aligned.
 const BAR_H=15, BAR_GAP=2, DATE_H=18;   // DATE_H = cell padding-top(2) + date height(16)
-let EVENTS=[], NOW=new Date(), CUR=startOfMonth(new Date()), MODE=localStorage.getItem("cal.viewmode")||"month";
-let WIN0=null, WIN1=null;   // fetched window bounds (Date)
+let EVENTS=[], NOW=new Date(), WIN0=null, WIN1=null;   // WIN0/WIN1 = fetched window bounds
+let MODE=localStorage.getItem("cal.viewmode")||"month";
+// init the visible period to TODAY's month/week per the persisted mode (not the 1st of the month)
+let CUR=MODE==="week"?startOfWeek(new Date()):startOfMonth(new Date());
 
 function startOfMonth(d){return new Date(d.getFullYear(),d.getMonth(),1);}
 function startOfWeek(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);x.setHours(0,0,0,0);return x;}
@@ -195,12 +197,14 @@ async function load(){
     const d=await (await fetch("/plugin/calendar/data")).json();
     if(d.error){showErr(d.error);return;}
     EVENTS=(d.events||[]).filter(e=>e&&e.start);
+    if(!EVENTS.length && d.errors){showErr("calendar feeds unavailable");return;}
     if(EVENTS.length){WIN0=new Date(EVENTS[0].start);WIN1=new Date(EVENTS[EVENTS.length-1].start);}
     render();
   }catch(e){showErr("calendar offline");}
 }
 
 function render(){
+  NOW=new Date();                 // refresh so today-highlight + agenda "upcoming" roll over at midnight
   if(ctx!=="main"){renderAgenda();return;}
   document.getElementById("cal-mode").textContent = MODE==="month"?"Week":"Month";
   if(MODE==="month") renderMonth(); else renderWeek();   // renderWeek added in Task 4
