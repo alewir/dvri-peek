@@ -267,24 +267,19 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .tile{flex:1 1 0;min-height:0;position:relative;background:#000;border:2px solid var(--line);border-radius:9px;
        overflow:hidden;cursor:pointer;display:flex;flex-direction:column}
  .tile.active{outline:2px solid var(--accent);outline-offset:-2px;cursor:default}
- .tile .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;
-            background:linear-gradient(#000c,#0000);display:flex;align-items:center;gap:6px;z-index:2}
  .tname{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .tmeta{flex:0 0 auto;white-space:nowrap;font-size:11px}
+ .tmeta{flex:0 0 auto;white-space:nowrap;font-size:10px;color:#9ca3af;font-variant-numeric:tabular-nums}
  .tile .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
             color:#9ca3af;font-size:13px;text-align:center;padding:10px}
- .tilehead{display:none;padding:3px 8px;font-size:12px;font-weight:600;color:var(--txt);
-   background:#141417;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}
- .tile.active .tilehead{display:block}
- /* active tile shows the filler + a header naming what's in the big pane; hide the
-    floating .lbl entirely so it never overlaps the header strip or the filler content */
- .tile.active .lbl{display:none}
+ /* header strip — always-visible row above media; tile = flex col → [strip][media] */
+ .tilehead{display:flex;align-items:center;gap:6px;padding:3px 8px;font-size:11px;font-weight:600;
+   color:var(--txt);background:#141417;border-bottom:1px solid #1c1c21;flex:0 0 auto;min-height:22px}
+ .tile.active .tilehead{border-left:3px solid var(--accent);padding-left:5px}
  .dot{width:8px;height:8px;border-radius:50%;background:#888;display:inline-block;margin-right:5px}
  .on{background:#22c55e}.off{background:#ef4444}.wait{background:#eab308}
  /* grid */
  .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));flex:1 1 auto;min-height:0;overflow:auto;align-content:start}
- .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;position:relative;aspect-ratio:16/9}
- .cell .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;background:linear-gradient(#000c,#0000);display:flex;align-items:center;gap:6px}
+ .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;aspect-ratio:16/9}
  /* collapsible header */
  header.collapsed{display:none}
  #revealbar{position:fixed;top:0;left:0;right:0;height:6px;background:#2563eb55;cursor:pointer;z-index:20;display:none}
@@ -308,9 +303,8 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .bigmedia{flex:1 1 auto;min-height:0;overflow:hidden;background:#000}
  .bigmedia img{width:100%;height:100%;object-fit:contain;display:block}
  .bigmedia iframe{width:100%;height:100%;border:0;display:block}
- /* tile media container */
- .tmediadiv{position:absolute;inset:0;overflow:hidden}
- .tile .tmediadiv{flex:1 1 auto;min-height:0;position:relative}
+ /* tile / cell media container — fills remaining height under the header strip */
+ .tmediadiv{flex:1 1 auto;min-height:0;position:relative;overflow:hidden}
  .tmediadiv img{width:100%;height:100%;object-fit:contain;background:#000;display:block}
  .tmediadiv iframe{width:100%;height:100%;background:#000;border:0;display:block}
 </style></head><body>
@@ -334,8 +328,7 @@ def render_spotlight(dev):
         lid, lname = ln["id"], ln.get("name", ln["id"])
         thumbs += f"""
         <div class="tile" id="th-{lid}" data-lens="{lid}" data-slot="{lid}" data-source="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
-          <div class="tilehead" id="tilehead-{lid}"></div>
-          <div class="lbl"><span class="tname">{lname}</span><span id="meta-{lid}" class="tmeta"><span class="dot wait"></span></span></div>
+          <div class="tilehead" id="tilehead-{lid}"><span class="tname">{lname}</span><span class="tmeta"></span></div>
           <div class="tmediadiv" id="tmedia-{lid}">{_tile_media(lid, "tile")}</div>
           <div class="clickcatch"></div>
           <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
@@ -357,7 +350,7 @@ def render_grid(dev):
         lid, lname = ln["id"], ln.get("name", ln["id"])
         cells += f"""
         <div class="cell" data-source="{lid}" data-slot="{lid}" data-dev="{dev['id']}">
-          <div class="lbl"><span class="tname">{lname}</span><span id="meta-{lid}" class="tmeta"><span class="dot wait"></span></span></div>
+          <div class="tilehead"><span class="tname">{lname}</span><span class="tmeta"></span></div>
           <div class="tmediadiv">{_tile_media(lid, "tile")}</div>
           <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
         </div>"""
@@ -472,20 +465,16 @@ function applyAssignments(){
         const assignedSrc=tiles[slot]||defaultSrc;
         const isActive=th.dataset.source===selected;
         th.classList.toggle('active',isActive);
-        const _sm=SOURCES.find(s=>s.id===assignedSrc), _tn=th.querySelector('.tname');
-        if(_tn){const nm=_sm?_sm.name:assignedSrc; if(_tn.textContent!==nm)_tn.textContent=nm;}
+        const _sm=SOURCES.find(s=>s.id===assignedSrc);
+        const _tn=th.querySelector('.tname');
+        if(_tn){const nm=(_sm?_sm.name:assignedSrc)+(isActive?' · in main':''); if(_tn.textContent!==nm)_tn.textContent=nm;}
+        th.dataset.src=assignedSrc;
         // tile media: active shows filler (or placeholder); others show assigned source
         let html;
         if(isActive&&filler) html=_mediaHTML(filler,'filler');
         else if(isActive) html='<div class="placeholder">&#9679; Live in main view</div>';
         else html=_mediaHTML(assignedSrc,'tile');
         setMedia(th.querySelector('.tmediadiv'),html);
-        // title strip: set on active tile, cleared on others
-        const headEl=document.getElementById('tilehead-'+th.dataset.slot);
-        if(headEl){
-          const ht=isActive?((th.querySelector('.tname')||{}).textContent||'')+' · in main':'';
-          if(headEl.textContent!==ht) headEl.textContent=ht;
-        }
         // picker: active tile picker selects filler; others select slot source
         const pickerLbl=th.querySelector('.picker-lbl');
         if(pickerLbl) pickerLbl.textContent=isActive?'Filler:':'Show:';
@@ -507,6 +496,7 @@ function applyAssignments(){
       const assignedSrc=tiles[slot]||cell.dataset.source;
       const _csm=SOURCES.find(s=>s.id===assignedSrc), _ctn=cell.querySelector('.tname');
       if(_ctn){const nm=_csm?_csm.name:assignedSrc; if(_ctn.textContent!==nm)_ctn.textContent=nm;}
+      cell.dataset.src=assignedSrc;
       setMedia(cell.querySelector('.tmediadiv'),_mediaHTML(assignedSrc,'tile'));
       const picker=cell.querySelector('.picker');
       if(picker){
@@ -551,12 +541,22 @@ function setStream(m){
   });
 }
 async function poll(){
-  try{const s=await (await fetch('/status')).json();
-    for(const c of s){ const m=document.getElementById('meta-'+c.id); if(!m)continue;
+  try{
+    const s=await (await fetch('/status')).json();
+    const statusMap={};
+    for(const c of s) statusMap[c.id]=c;
+    document.querySelectorAll('.tile,.cell').forEach(el=>{
+      if(el.classList.contains('tile')&&el.classList.contains('active')) return;
+      const src=el.dataset.src;
+      const m=el.querySelector('.tmeta');
+      if(!m) return;
+      if(!src||src.startsWith('plugin:')){m.innerHTML='';return;}
+      const c=statusMap[src];
+      if(!c){m.innerHTML='<span class="dot off"></span>';return;}
       const on=c.status.startsWith('online');
       m.innerHTML='<span class="dot '+(on?'on':(c.status==='connecting'?'wait':'off'))+'"></span>'+
-                  (on? c.resolution+' '+c.fps+'f':'');
-    }
+                  (on?c.resolution+' '+c.fps+'f':'');
+    });
   }catch(e){}
 }
 setInterval(poll,1500); poll();

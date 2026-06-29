@@ -112,3 +112,59 @@ def test_picker_stops_propagation_and_is_labelled(tmp_path, monkeypatch):
     assert 'class="picker-lbl"' in html
     # default label is "Show:" (content picker for non-active tiles)
     assert 'Show:' in html
+
+
+# --- Chrome redesign: always-visible header strip (Bug 1, 2, 3) ---
+
+def test_tilehead_is_always_visible_not_conditional(tmp_path, monkeypatch):
+    html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
+    # .tilehead base rule must use display:flex (always on), not display:none
+    compact = html.replace(' ', '').replace('\n', '')
+    assert '.tilehead{display:flex' in compact
+    # old conditional "only show on active tile" rules must be gone
+    assert '.tile.active .tilehead{display:block}' not in compact
+
+
+def test_no_absolute_lbl_overlay_on_tiles(tmp_path, monkeypatch):
+    html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
+    # The position:absolute gradient overlay that caused overlap must be removed
+    # from both tile and cell CSS rules
+    assert '.tile .lbl' not in html
+    assert '.cell .lbl' not in html
+
+
+def test_grid_cell_has_tilehead_strip(tmp_path, monkeypatch):
+    # render_grid() is pure (no global state); call it directly with a synthetic device
+    _client(tmp_path, monkeypatch)  # bootstraps the player module
+    import player
+    dev = {'id': 'nvr', 'name': 'NVR',
+           'lenses': [{'id': 'ch1', 'name': 'Ch 1', 'channel': 0},
+                      {'id': 'ch2', 'name': 'Ch 2', 'channel': 1}]}
+    out = player.render_grid(dev)
+    assert 'class="tilehead"' in out
+    assert 'class="tname"' in out
+    assert 'class="tmeta"' in out
+    # no absolute lbl overlay in grid cells
+    assert 'class="lbl"' not in out
+
+
+def test_poll_uses_data_src_not_meta_id(tmp_path, monkeypatch):
+    html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
+    # poll() must use dataset.src to resolve the currently-assigned source per tile
+    assert 'dataset.src' in html
+    # plugin sources must suppress status (content-aware)
+    assert "startsWith('plugin:')" in html
+    # old hard-coded meta-id lookup must be gone
+    assert "getElementById('meta-'" not in html
+
+
+def test_tile_header_strip_structure(tmp_path, monkeypatch):
+    html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
+    # Every spotlight tile has the unified tilehead containing tname + tmeta
+    # (fixture has 2 lenses → 2 tiles → 2 tilehead divs minimum)
+    assert html.count('class="tilehead"') >= 2
+    # .tname and .tmeta live inside the strip (not in a separate .lbl overlay)
+    assert 'class="tname"' in html
+    assert 'class="tmeta"' in html
+    # No standalone .lbl div in tile or cell HTML
+    assert 'class="lbl"' not in html
