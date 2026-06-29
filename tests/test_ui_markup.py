@@ -168,3 +168,38 @@ def test_tile_header_strip_structure(tmp_path, monkeypatch):
     assert 'class="tmeta"' in html
     # No standalone .lbl div in tile or cell HTML
     assert 'class="lbl"' not in html
+
+
+# --- Active spotlight tile: 3-zone header strip (left / center / right) ---
+
+def test_active_tile_header_has_three_zones(tmp_path, monkeypatch):
+    import re
+    html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
+    # Spotlight tile strip carries a CENTER preview zone (.tpreview) for the active
+    # tile's currently-shown filler, between name (left) and status (right).
+    assert 'class="tpreview"' in html
+    # Ordering inside a spotlight tile strip: left (.tname) -> center (.tpreview) -> right (.tmeta)
+    m = re.search(r'class="tilehead"[^>]*>(.*?)</div>', html)
+    assert m, "tilehead strip not found"
+    strip = m.group(1)
+    assert strip.index('tname') < strip.index('tpreview') < strip.index('tmeta')
+
+
+def test_active_center_zone_is_muted_and_collapses_when_empty(tmp_path, monkeypatch):
+    html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
+    compact = html.replace(' ', '').replace('\n', '')
+    # Empty center collapses (center omitted entirely when there is no filler / non-active tiles)
+    assert '.tpreview:empty{display:none}' in compact
+    # Center reads dimmer than the left (muted grey), distinct from the bright .tname
+    assert '.tpreview{' in compact
+
+
+def test_active_header_js_preview_label_and_filler_status(tmp_path, monkeypatch):
+    html = _client(tmp_path, monkeypatch).get("/").get_data(as_text=True)
+    compact = html.replace(' ', '').replace('\n', '')
+    # Center zone renders the bracketed, muted preview label for the current filler
+    assert '[preview: ' in html
+    # Active tile's status source (dataset.src) is the FILLER — drives the content-aware poll()
+    assert 'dataset.src=isActive?(filler' in compact
+    # poll() no longer skips the active tile: its right zone must show the filler's live status
+    assert "contains('active'))return" not in compact

@@ -269,6 +269,12 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .tile.active{outline:2px solid var(--accent);outline-offset:-2px;cursor:default}
  .tname{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .tmeta{flex:0 0 auto;white-space:nowrap;font-size:10px;color:#9ca3af;font-variant-numeric:tabular-nums}
+ /* active tile = 3-zone strip: name (left) · [preview: filler] (center, muted) · status (right) */
+ .tpreview{flex:0 99 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+   font-size:10px;font-weight:500;color:#8b8b93}
+ .tpreview:empty{display:none}
+ .tile.active .tname{flex:0 1 auto}
+ .tile.active .tmeta{margin-left:auto}
  .tile .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
             color:#9ca3af;font-size:13px;text-align:center;padding:10px}
  /* header strip — always-visible row above media; tile = flex col → [strip][media] */
@@ -328,7 +334,7 @@ def render_spotlight(dev):
         lid, lname = ln["id"], ln.get("name", ln["id"])
         thumbs += f"""
         <div class="tile" id="th-{lid}" data-lens="{lid}" data-slot="{lid}" data-source="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
-          <div class="tilehead" id="tilehead-{lid}"><span class="tname">{lname}</span><span class="tmeta"></span></div>
+          <div class="tilehead" id="tilehead-{lid}"><span class="tname">{lname}</span><span class="tpreview"></span><span class="tmeta"></span></div>
           <div class="tmediadiv" id="tmedia-{lid}">{_tile_media(lid, "tile")}</div>
           <div class="clickcatch"></div>
           <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
@@ -467,8 +473,14 @@ function applyAssignments(){
         th.classList.toggle('active',isActive);
         const _sm=SOURCES.find(s=>s.id===assignedSrc);
         const _tn=th.querySelector('.tname');
+        // LEFT: big-pane source name (+ "· in main" on the active tile)
         if(_tn){const nm=(_sm?_sm.name:assignedSrc)+(isActive?' · in main':''); if(_tn.textContent!==nm)_tn.textContent=nm;}
-        th.dataset.src=assignedSrc;
+        // CENTER: "[preview: <filler>]" — muted; empty (→display:none) for non-active or no filler
+        const _tp=th.querySelector('.tpreview');
+        if(_tp){let pv=''; if(isActive&&filler){const _fm=SOURCES.find(s=>s.id===filler); pv='[preview: '+(_fm?_fm.name:filler)+']';}
+          if(_tp.textContent!==pv) _tp.textContent=pv;}
+        // RIGHT (status source): active tile reflects the FILLER it actually shows; others their slot source
+        th.dataset.src=isActive?(filler||''):assignedSrc;
         // tile media: active shows filler (or placeholder); others show assigned source
         let html;
         if(isActive&&filler) html=_mediaHTML(filler,'filler');
@@ -543,7 +555,7 @@ async function poll(){
     const statusMap={};
     for(const c of s) statusMap[c.id]=c;
     document.querySelectorAll('.tile,.cell').forEach(el=>{
-      if(el.classList.contains('tile')&&el.classList.contains('active')) return;
+      // active tile included: its .tmeta (right zone) shows the FILLER's status via dataset.src
       const src=el.dataset.src;
       const m=el.querySelector('.tmeta');
       if(!m) return;
