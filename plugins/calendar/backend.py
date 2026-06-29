@@ -124,11 +124,12 @@ def expand(events, window_start, window_end):
     return out
 
 def fetch(config, now=None):
-    max_events = int(config.get("max_events", 12) or 12)
-    lookahead = int(config.get("lookahead_days", 30) or 30)
+    lookback = int(config.get("lookback_days", 90) or 90)
+    lookahead = int(config.get("lookahead_days", 365) or 365)
+    cap = int(config.get("max_events_grid", 2000) or 2000)
     sources = config.get("sources", []) or []
     now = now or datetime.now(timezone.utc)
-    w0 = now - timedelta(hours=12)
+    w0 = now - timedelta(days=lookback)
     w1 = now + timedelta(days=lookahead)
     merged, errors = [], []
     for src in sources:
@@ -147,9 +148,12 @@ def fetch(config, now=None):
         except Exception as e:                           # noqa: BLE001
             errors.append({"source": src.get("name", ""), "error": str(e)})
     merged.sort(key=lambda e: e["_sortkey"])
+    truncated = len(merged) > cap
     for e in merged:
         del e["_sortkey"]
-    out = {"events": merged[:max_events], "generated": now.isoformat()}
+    out = {"events": merged[:cap], "generated": now.isoformat()}
+    if truncated:
+        out["truncated"] = True
     if errors:
         out["errors"] = errors
     return out

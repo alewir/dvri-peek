@@ -80,3 +80,35 @@ def test_rrule_weekly_byday():
     occ = b.expand(evs, w0, w1)
     dates = sorted(e["start"].date().isoformat() for e in occ)
     assert dates == ["2026-06-29", "2026-07-01", "2026-07-06", "2026-07-08"]
+
+def test_fetch_uses_broad_window_and_cap(monkeypatch):
+    b = _backend()
+    # one event ~200 days out must be INCLUDED with the wide default lookahead
+    far = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:f\r\nSUMMARY:Far\r\n" \
+          "DTSTART:20270115T090000Z\r\nDTEND:20270115T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    monkeypatch.setattr(b, "_http_get", lambda url: far)
+    out = b.fetch({"sources": [{"name": "A", "color": "#111", "ics_url": "A"}]},
+                  now=datetime(2026, 6, 28, tzinfo=timezone.utc))
+    assert any(e["title"] == "Far" for e in out["events"])     # 200d out, inside 365d window
+    assert "errors" not in out
+
+def test_fetch_caps_at_max_events_grid(monkeypatch):
+    b = _backend()
+    body = ["BEGIN:VCALENDAR"]
+    for i in range(50):
+        body += ["BEGIN:VEVENT", f"UID:e{i}", "SUMMARY:E",
+                 "DTSTART:20260701T090000Z", "DTEND:20260701T093000Z",
+                 f"RRULE:FREQ=DAILY;COUNT=20", "END:VEVENT"]  # 50*20 = 1000 occurrences
+    body.append("END:VCALENDAR")
+    monkeypatch.setattr(b, "_http_get", lambda url: "\r\n".join(body))
+    out = b.fetch({"max_events_grid": 100, "sources": [{"name": "A", "color": "#1", "ics_url": "A"}]},
+                  now=datetime(2026, 6, 28, tzinfo=timezone.utc))
+    assert len(out["events"]) == 100
+
+def test_allday_multiday_exclusive_end():
+    b = _backend()
+    evs = b.parse_ics(Path("tests/fixtures/cal_multiday.ics").read_text())
+    assert len(evs) == 1 and evs[0]["allday"] is True
+    # DTSTART 07-03, DTEND 07-08 (exclusive) -> covers 07-03..07-07
+    assert evs[0]["start"] == datetime(2026, 7, 3, tzinfo=timezone.utc)
+    assert evs[0]["end"] == datetime(2026, 7, 8, tzinfo=timezone.utc)
