@@ -274,6 +274,10 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .tilehead{display:none;padding:3px 8px;font-size:12px;font-weight:600;color:var(--txt);
    background:#141417;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}
  .tile.active .tilehead{display:block}
+ /* active tile: title lives in the .tilehead strip — drop the .lbl gradient mask and
+    its duplicate name so the strip title (left) + status meta (right) both stay readable */
+ .tile.active .lbl{background:none}
+ .tile.active .tname{display:none}
  .dot{width:8px;height:8px;border-radius:50%;background:#888;display:inline-block;margin-right:5px}
  .on{background:#22c55e}.off{background:#ef4444}.wait{background:#eab308}
  /* grid */
