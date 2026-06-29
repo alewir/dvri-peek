@@ -1,48 +1,237 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Calendar</title>
 <style>
+ /* ── base ─────────────────────────────────────────── */
  html,body{margin:0;height:100%;background:#0e0e10;color:#e4e4e7;overflow:hidden;
-   font-family:system-ui,Segoe UI,Arial,sans-serif}
- .wrap{height:100%;overflow:auto;padding:8px 10px}
- .ev{display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid #ffffff12}
- .dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;align-self:center}
- .when{opacity:.75;font-variant-numeric:tabular-nums;white-space:nowrap}
- .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .day{opacity:.6;margin:8px 0 2px;font-size:.8em;text-transform:uppercase;letter-spacing:.05em}
- .err{color:#fca5a5;padding:8px}
- body[data-ctx="tile"] .wrap,body[data-ctx="filler"] .wrap{font-size:12px}
- body[data-ctx="main"] .wrap{font-size:16px;padding:14px 18px}
+   font-family:system-ui,Segoe UI,Arial,sans-serif;font-variant-numeric:tabular-nums}
+ #wrap{height:100%;display:flex;flex-direction:column}
+
+ /* ── agenda (tile / filler) ───────────────────────── */
+ .agenda{height:100%;overflow:auto;padding:5px 0}
+ .ev{display:flex;align-items:center;gap:0;padding:4px 10px;
+   border-bottom:1px solid #ffffff0d}
+ /* colored dot — inline-block so it renders inside chips too */
+ .dot{display:inline-block;width:7px;height:7px;border-radius:50%;
+   flex:0 0 7px;vertical-align:middle;margin-right:8px}
+ /* timestamp rail: hairline divider between date and title */
+ .when{font-size:11px;opacity:.5;white-space:nowrap;font-variant-numeric:tabular-nums;
+   padding-right:10px;margin-right:10px;border-right:1px solid #ffffff18;flex:0 0 auto}
+ .title{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+ .err{color:#fca5a5;padding:8px;font-size:12px}
+
+ /* ── controls bar (main ctx only) ────────────────── */
+ #cal-controls{display:none;flex:0 0 auto;align-items:center;gap:6px;
+   padding:5px 10px;border-bottom:1px solid #ffffff0f}
+ body[data-ctx="main"] #cal-controls{display:flex}
+ #cal-controls button{
+   background:transparent;border:1px solid #ffffff1c;color:#a1a1aa;
+   border-radius:4px;padding:3px 10px;cursor:pointer;font-size:12px;
+   letter-spacing:.02em;transition:color .12s,border-color .12s}
+ #cal-controls button:hover:not(:disabled){color:#e4e4e7;border-color:#ffffff38}
+ #cal-controls button:disabled{opacity:.22;cursor:default}
+ /* month/year label — flex:1 so it fills the gap between nav cluster and mode btn */
+ #cal-label{font-size:13px;font-weight:600;letter-spacing:.05em;color:#e4e4e7;
+   flex:1;text-align:center}
+ #cal-mode{flex:none}
+
+ /* ── calendar body ────────────────────────────────── */
+ #cal-body{flex:1 1 auto;min-height:0;overflow:hidden}
+ body:not([data-ctx="main"]) #cal-body{display:none}
+ /* agenda hidden in main ctx — cal-body fills wrap instead */
+ body[data-ctx="main"] .agenda{display:none}
+
+ /* ── month grid ───────────────────────────────────── */
+ /* 1px gaps act as grid lines without fighting border-collapse */
+ .cal-month{display:grid;grid-template-columns:repeat(7,1fr);
+   grid-template-rows:20px repeat(6,1fr);height:100%;
+   gap:1px;background:#ffffff0a}
+ /* day-of-week header row */
+ .cal-dow{font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+   color:#6b7280;padding:2px 5px;background:#0e0e10;
+   display:flex;align-items:center}
+ /* calendar cells */
+ .cal-cell{background:#0e0e10;padding:3px 4px 2px;overflow:hidden;
+   min-height:0;display:flex;flex-direction:column}
+ .cal-cell.dim .cal-date{opacity:.25;font-weight:400}
+ .cal-cell.dim .chip,.cal-cell.dim .spanbar{opacity:.35}
+ /* today — slow breathing glow (the signature element) */
+ @keyframes today-pulse{
+   0%,100%{box-shadow:inset 0 0 0 1px #2563eb,0 0 5px #2563eb28}
+   50%    {box-shadow:inset 0 0 0 1px #3b82f6,0 0 12px #3b82f645}
+ }
+ .cal-cell.today{animation:today-pulse 4s ease-in-out infinite}
+ .cal-cell.today .cal-date{color:#60a5fa;font-weight:700}
+ @media(prefers-reduced-motion:reduce){
+   .cal-cell.today{animation:none;box-shadow:inset 0 0 0 1px #2563eb}
+ }
+ /* day number — larger for readability at distance */
+ .cal-date{font-size:13px;font-weight:600;line-height:1.15;color:#c4c4c8;margin-bottom:1px}
+ /* event chips (timed single-day) */
+ .chip{font-size:10px;font-weight:500;border-radius:3px;padding:1px 4px;
+   margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+   line-height:14px}
+ .chip .dot{width:5px;height:5px;flex:0 0 5px;margin-right:3px}
+ /* spanning bars (multi-day / all-day) */
+ .spanbar{font-size:10px;font-weight:500;border-radius:3px;padding:0 5px;
+   color:#fff;white-space:nowrap;overflow:hidden;line-height:15px;
+   margin-top:1px;opacity:.92}
+ /* overflow label */
+ .more{font-size:9px;opacity:.4;margin-top:1px;padding-left:2px}
 </style></head><body>
-<div class="wrap" id="wrap">…</div>
+<div id="wrap">
+  <div id="cal-controls">
+    <button id="cal-prev">‹</button><button id="cal-today">Today</button>
+    <button id="cal-next">›</button><span id="cal-label"></span>
+    <button id="cal-mode">Week</button>
+  </div>
+  <div class="agenda" id="agenda">…</div>
+  <div id="cal-body"></div>
+</div>
 <script>
 const ctx=new URLSearchParams(location.search).get("ctx")||"tile";
 document.body.dataset.ctx=ctx;
-const full = ctx==="main";
-function fmtTime(e){
-  if(e.allday) return "all day";
-  const d=new Date(e.start);
-  return d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+const MS_DAY=86400000;
+let EVENTS=[], NOW=new Date(), CUR=startOfMonth(new Date()), MODE=localStorage.getItem("cal.viewmode")||"month";
+let WIN0=null, WIN1=null;   // fetched window bounds (Date)
+
+function startOfMonth(d){return new Date(d.getFullYear(),d.getMonth(),1);}
+function startOfWeek(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);x.setHours(0,0,0,0);return x;}
+function sameDay(a,b){return a.getFullYear()==b.getFullYear()&&a.getMonth()==b.getMonth()&&a.getDate()==b.getDate();}
+function dnum(d){return Math.floor(d.getTime()/MS_DAY);}   // day index (local midnight bucket)
+function esc(s){return (s||"").replace(/[<>&]/g,"");}
+function fmtTime(e){if(e.allday)return"all day";return new Date(e.start).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});}
+
+// pure helpers (also asserted present by the markup test)
+function splitSpanByWeek(startIdx,endIdxExcl,weekStartIdx){
+  // returns [{row, col0, col1}] segments clipped to weeks starting at weekStartIdx
+  const out=[];
+  let s=startIdx;
+  while(s<endIdxExcl){
+    const row=Math.floor((s-weekStartIdx)/7);
+    const weekEnd=weekStartIdx+(row+1)*7;       // exclusive
+    const segEnd=Math.min(endIdxExcl,weekEnd);
+    out.push({row, col0:(s-weekStartIdx)-row*7, col1:(segEnd-1-weekStartIdx)-row*7});
+    s=segEnd;
+  }
+  return out;
 }
-function dayKey(iso){return new Date(iso).toLocaleDateString([], {weekday:"short",day:"numeric",month:"short"});}
+function assignLanes(items){
+  // items: [{s,e}] day-index ranges (e exclusive). returns lane per item (greedy).
+  const lanes=[]; const res=new Array(items.length);
+  const order=items.map((it,i)=>i).sort((a,b)=>items[a].s-items[b].s||items[a].e-items[b].e);
+  for(const i of order){
+    let placed=-1;
+    for(let L=0;L<lanes.length;L++){ if(lanes[L]<=items[i].s){placed=L;break;} }
+    if(placed<0){placed=lanes.length;lanes.push(0);}
+    lanes[placed]=items[i].e; res[i]=placed;
+  }
+  return res;
+}
+
 async function load(){
-  const wrap=document.getElementById("wrap");
   try{
     const d=await (await fetch("/plugin/calendar/data")).json();
-    if(d.error){wrap.innerHTML='<div class="err">'+d.error+'</div>';return;}
-    const evs=d.events||[];
-    if(!evs.length){wrap.innerHTML='<div class="day">No upcoming events</div>';}
-    else{
-      let html="",lastDay=null;
-      for(const e of evs){
-        const dk=dayKey(e.start);
-        if(full && dk!==lastDay){html+='<div class="day">'+dk+'</div>';lastDay=dk;}
-        html+='<div class="ev"><span class="dot" style="background:'+e.color+'"></span>'+
-              '<span class="when">'+(full?fmtTime(e):dk+" "+fmtTime(e))+'</span>'+
-              '<span class="title">'+e.title.replace(/[<>&]/g,"")+'</span></div>';
-      }
-      wrap.innerHTML=html;
-    }
-    if(d.errors) wrap.insertAdjacentHTML("beforeend",'<div class="err">some feeds failed</div>');
-  }catch(err){wrap.innerHTML='<div class="err">calendar offline</div>';}
+    if(d.error){document.getElementById("agenda").innerHTML='<div class="err">'+esc(d.error)+'</div>';return;}
+    EVENTS=(d.events||[]).filter(e=>e&&e.start);
+    if(EVENTS.length){WIN0=new Date(EVENTS[0].start);WIN1=new Date(EVENTS[EVENTS.length-1].start);}
+    render();
+  }catch(e){document.getElementById("agenda").innerHTML='<div class="err">calendar offline</div>';}
 }
-load(); setInterval(load, 5*60*1000);
+
+function render(){
+  if(ctx!=="main"){renderAgenda();return;}
+  document.getElementById("cal-mode").textContent = MODE==="month"?"Week":"Month";
+  if(MODE==="month") renderMonth(); else renderWeek();   // renderWeek added in Task 4
+}
+
+function renderAgenda(){
+  const max=12, up=EVENTS.filter(e=>new Date(e.end||e.start)>=NOW).slice(0,max);
+  const a=document.getElementById("agenda");
+  if(!up.length){a.innerHTML='<div class="err" style="opacity:.6">No upcoming events</div>';return;}
+  a.innerHTML=up.map(e=>{
+    const dk=new Date(e.start).toLocaleDateString([], {weekday:"short",day:"numeric",month:"short"});
+    return '<div class="ev"><span class="dot" style="background:'+e.color+'"></span>'+
+      '<span class="when">'+dk+' '+fmtTime(e)+'</span><span class="title">'+esc(e.title)+'</span></div>';
+  }).join("");
+}
+
+function renderMonth(){
+  const body=document.getElementById("cal-body");
+  const first=startOfMonth(CUR), gridStart=startOfWeek(first);
+  const weekStartIdx=dnum(gridStart);
+  document.getElementById("cal-label").textContent=CUR.toLocaleDateString([], {month:"long",year:"numeric"});
+  // 6 weeks x 7
+  let html='<div class="cal-month">';
+  const dows=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  // header row of weekday names
+  html+=dows.map(n=>'<div class="cal-dow">'+n+'</div>').join("");
+  const cells=[];
+  for(let i=0;i<42;i++){
+    const d=new Date(gridStart.getTime()+i*MS_DAY);
+    cells.push(d);
+    const cls=(d.getMonth()!=CUR.getMonth()?"dim ":"")+(sameDay(d,NOW)?"today":"");
+    html+='<div class="cal-cell '+cls+'" data-idx="'+i+'"><div class="cal-date">'+d.getDate()+'</div></div>';
+  }
+  html+='</div>';
+  body.innerHTML=html;
+  const monthEl=body.querySelector(".cal-month");
+  // multi-day / all-day spanning bars (lane-stacked, week-wrapped)
+  const spans=EVENTS.filter(e=>e.allday || (dnum(new Date(e.end))>dnum(new Date(e.start))))
+    .map(e=>{const s=dnum(new Date(e.start));
+            let eend=dnum(new Date(e.end)); if(!e.allday) eend+=1;   // timed inclusive -> exclusive
+            return {e,s,eExcl:eend};})
+    .filter(x=>x.eExcl>weekStartIdx && x.s<weekStartIdx+42);
+  const lanes=assignLanes(spans.map(x=>({s:Math.max(x.s,weekStartIdx),e:Math.min(x.eExcl,weekStartIdx+42)})));
+  const cellEls=[...monthEl.querySelectorAll(".cal-cell")];
+  spans.forEach((x,i)=>{
+    for(const seg of splitSpanByWeek(Math.max(x.s,weekStartIdx),Math.min(x.eExcl,weekStartIdx+42),weekStartIdx)){
+      const anchor=cellEls[seg.row*7+seg.col0];
+      const bar=document.createElement("div");
+      bar.className="spanbar"; bar.style.background=x.e.color;
+      bar.style.gridColumn=(seg.col0+1)+" / "+(seg.col1+2);
+      bar.textContent=esc(x.e.title);
+      anchor.appendChild(bar);
+    }
+  });
+  // timed (single-day) events as chips, with +N more
+  const byCell={};
+  EVENTS.filter(e=>!e.allday && dnum(new Date(e.end))===dnum(new Date(e.start))).forEach(e=>{
+    const idx=dnum(new Date(e.start))-weekStartIdx; if(idx<0||idx>=42)return;
+    (byCell[idx]=byCell[idx]||[]).push(e);
+  });
+  Object.entries(byCell).forEach(([idx,list])=>{
+    const cell=cellEls[idx]; const show=list.slice(0,3);
+    show.forEach(e=>{const c=document.createElement("div");c.className="chip";
+      c.style.background=e.color+"33";
+      c.innerHTML='<span class="dot" style="background:'+e.color+'"></span> '+fmtTime(e)+' '+esc(e.title);
+      cell.appendChild(c);});
+    if(list.length>3){const m=document.createElement("div");m.className="more";m.textContent="+"+(list.length-3)+" more";cell.appendChild(m);}
+  });
+  updateNavBounds();
+}
+
+function renderWeek(){
+  // Week view — Task 4
+  document.getElementById("cal-body").innerHTML='<div style="padding:20px;opacity:.5">Week view (next task)</div>';
+  updateNavBounds();
+}
+
+function updateNavBounds(){
+  // disable prev/next when stepping would leave the fetched window
+  const prev=document.getElementById("cal-prev"), next=document.getElementById("cal-next");
+  if(!WIN0||!WIN1){prev.disabled=next.disabled=false;return;}
+  const step=(MODE==="month")?{m:1}:{d:7};
+  prev.disabled = stepDate(CUR,-1,step) < startOfMonth(WIN0);
+  next.disabled = stepDate(CUR, 1,step) > WIN1;
+}
+function stepDate(base,dir,step){const d=new Date(base);
+  if(step.m)d.setMonth(d.getMonth()+dir*step.m); else d.setDate(d.getDate()+dir*step.d); return d;}
+
+// nav + mode wiring
+document.getElementById("cal-prev").onclick=()=>{CUR=stepDate(CUR,-1,MODE==="month"?{m:1}:{d:7});render();};
+document.getElementById("cal-next").onclick=()=>{CUR=stepDate(CUR, 1,MODE==="month"?{m:1}:{d:7});render();};
+document.getElementById("cal-today").onclick=()=>{CUR=MODE==="month"?startOfMonth(new Date()):startOfWeek(new Date());render();};
+document.getElementById("cal-mode").onclick=()=>{MODE=MODE==="month"?"week":"month";localStorage.setItem("cal.viewmode",MODE);
+  CUR=MODE==="month"?startOfMonth(CUR):startOfWeek(CUR);render();};
+
+load(); setInterval(load,5*60*1000);
 </script></body></html>
