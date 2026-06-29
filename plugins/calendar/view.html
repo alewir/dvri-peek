@@ -92,6 +92,40 @@
  .chip .dot{width:5px;height:5px;flex:0 0 5px;margin-right:3px}
  /* overflow label */
  .more{font-size:9px;opacity:.4;margin-top:1px;padding-left:2px}
+
+ /* ── week view ────────────────────────────────────── */
+ .cal-week{display:flex;flex-direction:column;height:100%}
+ /* all-day band: 48px label column + 7 equal day columns */
+ .cal-allday{display:grid;grid-template-columns:48px repeat(7,1fr);
+   border-bottom:1px solid #ffffff20;min-height:24px;padding-bottom:2px}
+ .cal-allday .lbl{font-size:10px;opacity:.5;padding:4px 3px;letter-spacing:.04em}
+ /* all-day spanning bars are grid items of .cal-allday — gridColumn works because
+    .cal-allday is display:grid (same lesson as Month view span overlay) */
+ .cal-allday .spanbar{font-size:10px;font-weight:600;border-radius:3px;padding:0 5px;
+   margin:2px 1px 0;height:16px;line-height:16px;color:#fff;
+   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+   box-shadow:0 1px 2px #00000040;align-self:start}
+ /* hourly scroll area */
+ .cal-hours{flex:1 1 auto;overflow:auto;display:grid;
+   grid-template-columns:48px repeat(7,1fr);position:relative}
+ /* hour labels — flat #6b7280 matches .cal-dow exactly; no opacity layer */
+ .hourlab{font-size:10px;color:#6b7280;height:40px;border-top:1px solid #ffffff10;
+   padding:1px 4px;letter-spacing:.01em}
+ .daycol{position:relative;border-left:1px solid #ffffff10}
+ .hcell{height:40px;border-top:1px solid #ffffff10}
+ /* today column — soft blue wash + top accent cap-line echoing Month cell's inset border */
+ .daycol.today{background:#2563eb14;border-top:1px solid #3b82f666}
+ /* timed event blocks — absolutely positioned within their .daycol */
+ .tblock{position:absolute;left:2px;right:2px;border-radius:4px;color:#fff;
+   font-size:10px;font-weight:500;padding:1px 4px;overflow:hidden;
+   box-shadow:0 1px 3px #00000050;line-height:13px;white-space:nowrap;cursor:default}
+ /* week column day-header row */
+ .cal-week-header{display:grid;grid-template-columns:48px repeat(7,1fr);
+   flex:0 0 auto;border-bottom:1px solid #ffffff1c}
+ .cal-week-header .wh-lbl{width:48px}
+ .whdcol{font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+   color:#6b7280;padding:3px 4px;text-align:center}
+ .whdcol.today{color:#60a5fa;font-weight:700}
 </style></head><body>
 <div id="wrap">
   <div id="cal-controls">
@@ -260,9 +294,76 @@ function renderMonth(){
 }
 
 function renderWeek(){
-  // Week view — Task 4
-  document.getElementById("cal-body").innerHTML='<div style="padding:20px;opacity:.5">Week view (next task)</div>';
+  const body=document.getElementById("cal-body");
+  const ws=startOfWeek(CUR), wsIdx=dnum(ws);
+  const days=[...Array(7)].map((_,i)=>new Date(ws.getTime()+i*MS_DAY));
+  document.getElementById("cal-label").textContent=
+    days[0].toLocaleDateString([], {day:"numeric",month:"short"})+" – "+
+    days[6].toLocaleDateString([], {day:"numeric",month:"short"});
+  const HOUR=40;
+  const dows=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+  // build static skeleton via innerHTML
+  let html='<div class="cal-week">';
+  // day-of-week header row
+  html+='<div class="cal-week-header"><div class="wh-lbl"></div>';
+  for(let i=0;i<7;i++){
+    const tcls=sameDay(days[i],NOW)?" today":"";
+    html+='<div class="whdcol'+tcls+'">'+dows[i]+' '+days[i].getDate()+'</div>';
+  }
+  html+='</div>';
+  // all-day band (multi-day/all-day events appended as grid items later)
+  html+='<div class="cal-allday"><div class="lbl">all-day</div>';
+  for(let i=0;i<7;i++) html+='<div class="adcol" data-d="'+i+'"></div>';
+  html+='</div>';
+  // hourly scroll area: label column + 7 day columns each with 24 hcells
+  html+='<div class="cal-hours"><div>';
+  for(let h=0;h<24;h++) html+='<div class="hourlab">'+String(h).padStart(2,"0")+':00</div>';
+  html+='</div>';
+  for(let i=0;i<7;i++){
+    const tcls=sameDay(days[i],NOW)?" today":"";
+    html+='<div class="daycol'+tcls+'" data-d="'+i+'">';
+    for(let h=0;h<24;h++) html+='<div class="hcell"></div>';
+    html+='</div>';
+  }
+  html+='</div></div>';
+  body.innerHTML=html;
+
+  // all-day / multi-day spanning band — bars are grid items of .cal-allday
+  // so gridColumn actually spans (display:grid on the band, same pattern as Month overlay)
+  const adRow=body.querySelector(".cal-allday");
+  EVENTS.filter(e=>e.allday).forEach(e=>{
+    const s=dnum(new Date(e.start)), eExcl=dnum(new Date(e.end));
+    const c0=Math.max(s,wsIdx)-wsIdx, c1=Math.min(eExcl,wsIdx+7)-1-wsIdx;
+    if(c1<0||c0>6) return;
+    const bar=document.createElement("div"); bar.className="spanbar";
+    bar.style.background=e.color;
+    // +2: column 1 is the label, day columns start at 2
+    bar.style.gridColumn=(c0+2)+" / "+(c1+3);
+    bar.textContent=e.title;   // textContent — never esc() here
+    adRow.appendChild(bar);
+  });
+
+  // timed events: absolute within their .daycol, positioned by LOCAL time
+  const cols=[...body.querySelectorAll(".cal-hours .daycol")];
+  EVENTS.filter(e=>!e.allday).forEach(e=>{
+    const st=new Date(e.start);
+    const di=dnum(st)-wsIdx;
+    if(di<0||di>6) return;
+    const en=new Date(e.end||e.start);
+    const top=(st.getHours()+st.getMinutes()/60)*HOUR;
+    const mins=Math.max(20,(en-st)/60000);
+    const hgt=Math.max(14,(mins/60)*HOUR);
+    const b=document.createElement("div"); b.className="tblock";
+    b.style.top=top+"px"; b.style.height=hgt+"px";
+    b.style.background=e.color;
+    b.textContent=fmtTime(e)+" "+e.title;   // textContent — never esc() here
+    cols[di].appendChild(b);
+  });
+
   updateNavBounds();
+  // scroll to ~07:00 so morning events are immediately visible
+  const hrs=body.querySelector(".cal-hours"); if(hrs) hrs.scrollTop=7*HOUR;
 }
 
 function updateNavBounds(){

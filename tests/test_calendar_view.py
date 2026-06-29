@@ -10,3 +10,6 @@ def test_view_has_agenda_and_month_and_controls():
     assert "cal-prev" in H and "cal-next" in H and "cal-today" in H and "cal-mode" in H
     assert "cal.viewmode" in H                 # mode persisted in localStorage
     assert "splitSpanByWeek" in H and "assignLanes" in H   # spanning helpers present
+
+def test_view_has_week_grid():
+    assert "cal-week" in H and "renderWeek" in H and "cal-allday" in H
