@@ -199,7 +199,8 @@ def test_active_header_js_preview_label_and_filler_status(tmp_path, monkeypatch)
     compact = html.replace(' ', '').replace('\n', '')
     # Center zone renders the bracketed, muted preview label for the current filler
     assert '[preview: ' in html
-    # Active tile's status source (dataset.src) is the FILLER — drives the content-aware poll()
-    assert 'dataset.src=isActive?(filler' in compact
+    # Active tile's status source (dataset.src) is the EFFECTIVE filler (filler unless
+    # it equals the big-pane source) — drives the content-aware poll()
+    assert 'dataset.src=isActive?(effFiller' in compact
     # poll() no longer skips the active tile: its right zone must show the filler's live status
     assert "contains('active'))return" not in compact

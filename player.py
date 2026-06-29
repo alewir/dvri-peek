@@ -21,6 +21,7 @@ import os
 import sys
 import time
 import json
+import html
 import signal
 import argparse
 import threading
@@ -253,7 +254,6 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
  .right{margin-left:auto;display:flex;gap:6px;align-items:center}
  .sbtn{background:#222;border:1px solid var(--line);color:#cfcfd4;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px}
- .sbtn.active{background:#374151;border-color:#4b5563;color:#fff}
  .device{display:none;padding:10px;flex:1 1 auto;min-height:0}
  .device.active{display:flex;flex-direction:column;min-height:0}
  /* spotlight */
@@ -334,7 +334,7 @@ def render_spotlight(dev):
         lid, lname = ln["id"], ln.get("name", ln["id"])
         thumbs += f"""
         <div class="tile" id="th-{lid}" data-lens="{lid}" data-slot="{lid}" data-source="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
-          <div class="tilehead" id="tilehead-{lid}"><span class="tname">{lname}</span><span class="tpreview"></span><span class="tmeta"></span></div>
+          <div class="tilehead" id="tilehead-{lid}"><span class="tname">{html.escape(lname)}</span><span class="tpreview"></span><span class="tmeta"></span></div>
           <div class="tmediadiv" id="tmedia-{lid}">{_tile_media(lid, "tile")}</div>
           <div class="clickcatch"></div>
           <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
@@ -342,7 +342,7 @@ def render_spotlight(dev):
     return f"""
     <div class="spot" id="spot-{dev['id']}">
       <div class="big">
-        <div class="cap" id="bigcap-{dev['id']}">{lenses[0].get('name','')}</div>
+        <div class="cap" id="bigcap-{dev['id']}">{html.escape(lenses[0].get('name',''))}</div>
         <div class="bigmedia" id="bigmedia-{dev['id']}">{_tile_media(first, "main")}</div>
       </div>
       <div class="divider" data-dev="{dev['id']}" title="Drag to resize">⋮</div>
@@ -356,7 +356,7 @@ def render_grid(dev):
         lid, lname = ln["id"], ln.get("name", ln["id"])
         cells += f"""
         <div class="cell" data-source="{lid}" data-slot="{lid}" data-dev="{dev['id']}">
-          <div class="tilehead"><span class="tname">{lname}</span><span class="tmeta"></span></div>
+          <div class="tilehead"><span class="tname">{html.escape(lname)}</span><span class="tmeta"></span></div>
           <div class="tmediadiv">{_tile_media(lid, "tile")}</div>
           <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
         </div>"""
@@ -369,7 +369,7 @@ def index():
     panes = ""
     for i, dev in enumerate(DEVICES):
         active = " active" if i == 0 else ""
-        tabs += f'<button class="tab{active}" data-dev="{dev["id"]}" onclick="showTab(\'{dev["id"]}\')">{dev["name"]}</button>'
+        tabs += f'<button class="tab{active}" data-dev="{dev["id"]}" onclick="showTab(\'{dev["id"]}\')">{html.escape(dev["name"])}</button>'
         body = render_spotlight(dev) if dev.get("layout") == "spotlight" else render_grid(dev)
         panes += f'<div class="device{active}" id="dev-{dev["id"]}">{body}</div>'
     head = PAGE_HEAD
@@ -386,13 +386,21 @@ function showTab(dev){
 // ---- server-side layout state ----
 let LAYOUT={ui:{header_collapsed:false},devices:{}};
 let SOURCES=[];
+// Persisting is gated on a successful /api/layout load: an unloaded module default
+// must never overwrite good disk state. Stays false until /api/layout resolves.
+let LAYOUT_LOADED=false;
+// HTML-encode any local-config value interpolated into innerHTML strings (mirrors
+// plugins/calendar/view.html's esc): a stray quote in a name can't break markup.
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 async function loadState(){
-  try{
-    [SOURCES,LAYOUT]=await Promise.all([
-      fetch('/api/sources').then(r=>r.json()),
-      fetch('/api/layout').then(r=>r.json())
-    ]);
-  }catch(e){ console.error('loadState failed:',e); SOURCES=SOURCES||[]; }
+  // Fetch sources and layout INDEPENDENTLY: a failed /api/sources must not wipe
+  // LAYOUT (and vice-versa). Each settles into its own global only on success.
+  await Promise.allSettled([
+    fetch('/api/sources').then(r=>r.json()).then(d=>{SOURCES=d;})
+      .catch(e=>console.error('sources load failed:',e)),
+    fetch('/api/layout').then(r=>r.json()).then(d=>{LAYOUT=d;LAYOUT_LOADED=true;})
+      .catch(e=>console.error('layout load failed:',e))
+  ]);
   applyHeader(!!(LAYOUT.ui&&LAYOUT.ui.header_collapsed));
   applyAssignments();
   document.querySelectorAll('.device').forEach(d=>{
@@ -400,9 +408,10 @@ async function loadState(){
     if(d.querySelector('.spot')) initDivider(dev);
   });
 }
-function saveUI(ui){LAYOUT.ui=Object.assign({},LAYOUT.ui,ui);
+function saveUI(ui){if(!LAYOUT_LOADED) return; LAYOUT.ui=Object.assign({},LAYOUT.ui,ui);
   fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(LAYOUT)});}
-function saveLayout(){fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(LAYOUT)});}
+function saveLayout(){if(!LAYOUT_LOADED) return;
+  fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(LAYOUT)});}
 function toggleSettings(){document.body.classList.toggle('settings');
   if(!document.body.classList.contains('settings')) saveLayout();}
 // ---- collapsible header ----
@@ -415,10 +424,16 @@ function _mediaHTML(srcId,ctx){
   if(!srcId) return '';
   if(srcId.startsWith('plugin:')){
     const pid=srcId.split(':')[1];
-    return '<iframe class="pluginframe" src="/plugin/'+pid+'/view?ctx='+ctx+'" frameborder="0" sandbox="allow-scripts allow-same-origin"></iframe>';
+    return '<iframe class="pluginframe" src="/plugin/'+esc(pid)+'/view?ctx='+ctx+'" frameborder="0" sandbox="allow-scripts allow-same-origin"></iframe>';
   }
-  return '<img class="cam" data-id="'+srcId+'" src="/stream/'+srcId+'">';
+  return '<img class="cam" data-id="'+esc(srcId)+'" src="/stream/'+esc(srcId)+'">';
 }
+// A source is "known" when it exists in SOURCES. When /api/sources failed to load
+// (SOURCES empty) staleness is unknowable, so nothing is treated as removed.
+function srcKnown(id){return !SOURCES.length||SOURCES.some(s=>s.id===id);}
+// Resolve an assigned/override id against SOURCES: ids removed from config (stale
+// on-disk state) fall back to the slot default so a tile never points at nothing.
+function resolveSrc(id,def){return (id&&srcKnown(id))?id:def;}
 // Only rewrite a media container when its desired content actually changed.
 // Comparing against a stored intended-key (not el.innerHTML, which the browser
 // re-serializes) avoids needlessly tearing down + restarting live MJPEG <img>
@@ -429,11 +444,15 @@ function setMedia(el,html){
 }
 // Build the <select> options once per SOURCES set; only update the selection.
 // Rebuilding options on every render would drop a user's open dropdown.
-function fillPicker(picker,selVal){
+function fillPicker(picker,selVal,withNone){
   if(!picker||!SOURCES.length) return;
-  const sig=SOURCES.map(s=>s.id).join(',');
+  // Fold withNone into the cached signature so the option list rebuilds when a tile
+  // toggles between Show: and Filler: modes (else the (none) option goes missing/stale).
+  const sig=(withNone?'none|':'')+SOURCES.map(s=>s.id).join(',');
   if(picker.dataset.sig!==sig){
-    picker.innerHTML=SOURCES.map(s=>'<option value="'+s.id+'">'+s.name+'</option>').join('');
+    const opts=SOURCES.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+'</option>');
+    if(withNone) opts.unshift('<option value="">(none — live in main)</option>');
+    picker.innerHTML=opts.join('');
     picker.dataset.sig=sig;
   }
   if(picker.value!==(selVal||'')) picker.value=selVal||'';
@@ -445,31 +464,37 @@ function applyAssignments(){
     const dev=d.id.replace('dev-','');
     const devState=(LAYOUT.devices&&LAYOUT.devices[dev])||{};
     const tiles=devState.tiles||{};
-    const filler=devState.filler||null;
+    // stale on-disk filler (source removed from config) → no filler
+    const filler=resolveSrc(devState.filler||null,null);
     const thumbEls=[...d.querySelectorAll('.tile[data-dev="'+dev+'"]')];
-    // determine selected source (falls back to first thumb's default)
+    // determine selected tile; a stale/removed selection falls back to the first thumb
     let selected=devState.selected||null;
+    if(selected&&!srcKnown(selected)) selected=null;
     if(!selected&&thumbEls.length>0) selected=thumbEls[0].dataset.source;
     // spotlight: big pane + thumbnails
     if(thumbEls.length>0){
       const selThumb=thumbEls.find(t=>t.dataset.source===selected)||thumbEls[0];
-      if(selThumb){
-        const selSrc=tiles[selThumb.dataset.slot]||selThumb.dataset.source;
-        const _bigMeta=SOURCES.find(s=>s.id===selSrc);
-        if(_bigMeta&&_bigMeta.type==='lens') mainLenses.push(selSrc);
-        setMedia(d.querySelector('#bigmedia-'+dev),_mediaHTML(selSrc,'main'));
-        const bigcap=d.querySelector('#bigcap-'+dev);
-        if(bigcap){
-          const meta=SOURCES.find(s=>s.id===selSrc);
-          const name=meta?meta.name:((selThumb.querySelector('.tname')||{}).textContent||'');
-          if(bigcap.textContent!==name) bigcap.textContent=name;
-        }
+      // pin selection to a real tile so EXACTLY ONE tile is ever active
+      selected=selThumb.dataset.source;
+      const selSrc=resolveSrc(tiles[selThumb.dataset.slot],selThumb.dataset.source);
+      // tier by prefix (not SOURCES lookup): a failed /api/sources can't drop the big lens to sub
+      if(selSrc&&!selSrc.startsWith('plugin:')) mainLenses.push(selSrc);
+      setMedia(d.querySelector('#bigmedia-'+dev),_mediaHTML(selSrc,'main'));
+      const bigcap=d.querySelector('#bigcap-'+dev);
+      if(bigcap){
+        // resolve un-suffixed name from SOURCES (never the active thumb's .tname,
+        // which now carries the " · in main" decoration)
+        const meta=SOURCES.find(s=>s.id===selSrc);
+        const name=meta?meta.name:selSrc;
+        if(bigcap.textContent!==name) bigcap.textContent=name;
       }
       thumbEls.forEach(th=>{
         const slot=th.dataset.slot;
         const defaultSrc=th.dataset.source;
-        const assignedSrc=tiles[slot]||defaultSrc;
+        const assignedSrc=resolveSrc(tiles[slot],defaultSrc);
         const isActive=th.dataset.source===selected;
+        // a filler equal to the big-pane source = no filler (don't duplicate main)
+        const effFiller=(isActive&&filler&&filler!==selSrc)?filler:null;
         th.classList.toggle('active',isActive);
         const _sm=SOURCES.find(s=>s.id===assignedSrc);
         const _tn=th.querySelector('.tname');
@@ -477,14 +502,15 @@ function applyAssignments(){
         if(_tn){const nm=(_sm?_sm.name:assignedSrc)+(isActive?' · in main':''); if(_tn.textContent!==nm)_tn.textContent=nm;}
         // CENTER: "[preview: <filler>]" — muted; empty (→display:none) for non-active or no filler
         const _tp=th.querySelector('.tpreview');
-        if(_tp){let pv=''; if(isActive&&filler){const _fm=SOURCES.find(s=>s.id===filler); pv='[preview: '+(_fm?_fm.name:filler)+']';}
+        if(_tp){let pv=''; if(effFiller){const _fm=SOURCES.find(s=>s.id===effFiller); pv='[preview: '+(_fm?_fm.name:effFiller)+']';}
           if(_tp.textContent!==pv) _tp.textContent=pv;}
         // RIGHT (status source): active tile reflects the FILLER it actually shows; others their slot source
-        th.dataset.src=isActive?(filler||''):assignedSrc;
-        // tile media: active shows filler (or placeholder); others show assigned source
+        th.dataset.src=isActive?(effFiller||''):assignedSrc;
+        // tile media: active shows filler (or a content-aware placeholder); others show assigned source
         let html;
-        if(isActive&&filler) html=_mediaHTML(filler,'filler');
-        else if(isActive) html='<div class="placeholder">&#9679; Live in main view</div>';
+        if(isActive&&effFiller) html=_mediaHTML(effFiller,'filler');
+        else if(isActive){const plg=selSrc&&selSrc.startsWith('plugin:');
+          html='<div class="placeholder">&#9679; '+(plg?'in main':'Live in main view')+'</div>';}
         else html=_mediaHTML(assignedSrc,'tile');
         setMedia(th.querySelector('.tmediadiv'),html);
         // picker: active tile picker selects filler; others select slot source
@@ -492,20 +518,20 @@ function applyAssignments(){
         if(pickerLbl) pickerLbl.textContent=isActive?'Filler:':'Show:';
         const picker=th.querySelector('.picker');
         if(picker){
-          fillPicker(picker,isActive?(filler||''):assignedSrc);
+          fillPicker(picker,isActive?(filler||''):assignedSrc,isActive);
           picker.onchange=isActive
             ?()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
-                   LAYOUT.devices[dev].filler=picker.value; applyAssignments(); }
+                   LAYOUT.devices[dev].filler=picker.value||null; applyAssignments(); saveLayout(); }
             :()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
                    LAYOUT.devices[dev].tiles=LAYOUT.devices[dev].tiles||{};
-                   LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); };
+                   LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); saveLayout(); };
         }
       });
     }
     // grid: update cell media + pickers (no selected/big-pane logic)
     d.querySelectorAll('.cell[data-dev="'+dev+'"]').forEach(cell=>{
       const slot=cell.dataset.slot;
-      const assignedSrc=tiles[slot]||cell.dataset.source;
+      const assignedSrc=resolveSrc(tiles[slot],cell.dataset.source);
       const _csm=SOURCES.find(s=>s.id===assignedSrc), _ctn=cell.querySelector('.tname');
       if(_ctn){const nm=_csm?_csm.name:assignedSrc; if(_ctn.textContent!==nm)_ctn.textContent=nm;}
       cell.dataset.src=assignedSrc;
@@ -515,7 +541,7 @@ function applyAssignments(){
         fillPicker(picker,assignedSrc);
         picker.onchange=()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
           LAYOUT.devices[dev].tiles=LAYOUT.devices[dev].tiles||{};
-          LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); };
+          LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); saveLayout(); };
       }
     });
   });
