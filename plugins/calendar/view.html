@@ -314,7 +314,8 @@ function renderWeek(){
   html+='</div>';
   // all-day band (multi-day/all-day events appended as grid items later)
   html+='<div class="cal-allday"><div class="lbl">all-day</div>';
-  for(let i=0;i<7;i++) html+='<div class="adcol" data-d="'+i+'"></div>';
+  // no filler cells: span bars (explicit gridColumn, auto row) lane-stack via
+  // grid auto-placement starting at row 1 (fillers would force them to row 2+)
   html+='</div>';
   // hourly scroll area: label column + 7 day columns each with 24 hcells
   html+='<div class="cal-hours"><div>';
@@ -333,9 +334,9 @@ function renderWeek(){
   // so gridColumn actually spans (display:grid on the band, same pattern as Month overlay)
   const adRow=body.querySelector(".cal-allday");
   EVENTS.filter(e=>e.allday).forEach(e=>{
-    const s=dnum(new Date(e.start)), eExcl=dnum(new Date(e.end));
+    const s=dnum(new Date(e.start)), eExcl=dnum(new Date(e.end||e.start));
     const c0=Math.max(s,wsIdx)-wsIdx, c1=Math.min(eExcl,wsIdx+7)-1-wsIdx;
-    if(c1<0||c0>6) return;
+    if(c1<c0||c1<0||c0>6) return;
     const bar=document.createElement("div"); bar.className="spanbar";
     bar.style.background=e.color;
     // +2: column 1 is the label, day columns start at 2
