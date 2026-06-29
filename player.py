@@ -366,14 +366,11 @@ def index():
         tabs += f'<button class="tab{active}" data-dev="{dev["id"]}" onclick="showTab(\'{dev["id"]}\')">{dev["name"]}</button>'
         body = render_spotlight(dev) if dev.get("layout") == "spotlight" else render_grid(dev)
         panes += f'<div class="device{active}" id="dev-{dev["id"]}">{body}</div>'
-    mode = next(iter(WORKERS.values())).stream_mode if WORKERS else "sub"
     head = PAGE_HEAD
-    controls = (f'<div class="right">'
-                f'<button class="sbtn{" active" if mode=="main" else ""}" id="b-main" onclick="setStream(\'main\')">Main HD</button>'
-                f'<button class="sbtn{" active" if mode=="sub" else ""}" id="b-sub" onclick="setStream(\'sub\')">Sub</button>'
-                f'<button class="sbtn" id="gear" onclick="toggleSettings()">&#9881;</button>'
-                f'<button class="sbtn" id="header-collapse" onclick="collapseHeader()">&#9662;</button>'
-                f'</div>')
+    controls = ('<div class="right">'
+                '<button class="sbtn" id="gear" onclick="toggleSettings()">&#9881;</button>'
+                '<button class="sbtn" id="header-collapse" onclick="collapseHeader()">&#9662;</button>'
+                '</div>')
     script = """
 <script>
 function showTab(dev){
@@ -437,6 +434,7 @@ function fillPicker(picker,selVal){
 }
 // ---- tile assignments ----
 function applyAssignments(){
+  const mainLenses=[];
   document.querySelectorAll('.device').forEach(d=>{
     const dev=d.id.replace('dev-','');
     const devState=(LAYOUT.devices&&LAYOUT.devices[dev])||{};
@@ -451,6 +449,8 @@ function applyAssignments(){
       const selThumb=thumbEls.find(t=>t.dataset.source===selected)||thumbEls[0];
       if(selThumb){
         const selSrc=tiles[selThumb.dataset.slot]||selThumb.dataset.source;
+        const _bigMeta=SOURCES.find(s=>s.id===selSrc);
+        if(_bigMeta&&_bigMeta.type==='lens') mainLenses.push(selSrc);
         setMedia(d.querySelector('#bigmedia-'+dev),_mediaHTML(selSrc,'main'));
         const bigcap=d.querySelector('#bigcap-'+dev);
         if(bigcap){
@@ -507,6 +507,7 @@ function applyAssignments(){
       }
     });
   });
+  syncStreams(mainLenses);
 }
 function promote(dev,lid){
   if(document.body.classList.contains('settings')) return;
@@ -533,12 +534,8 @@ function initDivider(dev){
     try{ localStorage.setItem('split-'+dev, big.style.flexBasis); }catch(e){}
   });
 }
-function setStream(m){
-  fetch('/set_stream?mode='+m).then(()=>{
-    document.getElementById('b-sub').classList.toggle('active',m==='sub');
-    document.getElementById('b-main').classList.toggle('active',m==='main');
-    document.querySelectorAll('img.cam').forEach(i=>{ if(i.src && !i.src.endsWith('/')) i.src=i.src.split('?')[0]+'?t='+Date.now(); });
-  });
+function syncStreams(main){
+  fetch('/api/streams',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({main})});
 }
 async function poll(){
   try{
@@ -603,12 +600,13 @@ def status():
                     for w in WORKERS.values()])
 
 
-@app.route("/set_stream")
-def set_stream():
-    mode = request.args.get("mode", "sub")
+@app.route("/api/streams", methods=["POST"])
+def api_streams():
+    data = request.get_json(force=True, silent=True) or {}
+    main_set = set(data.get("main", []))
     for w in WORKERS.values():
-        w.set_stream(mode)
-    return jsonify({"ok": True, "mode": mode})
+        w.set_stream("main" if w.id in main_set else "sub")
+    return jsonify({"ok": True})
 
 
 def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gateway=True,
