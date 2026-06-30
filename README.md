@@ -86,12 +86,18 @@ renders a **"needs credentials"** tile.
 ## Run
 
 ```bash
-./run.sh                 # main/HD streams, http://localhost:8090
-./run.sh --stream sub    # lighter low-res sub-streams
+./run.sh                 # http://localhost:8090
 ./run.sh --port 9000
 ```
 
 Open **http://localhost:8090**. The player auto-starts and stops `go2rtc`.
+Previews always run on low-res sub-streams; the selected (big-pane) lens auto-upgrades
+to main/HD — no stream-tier flag to set.
+
+> **LAN-open by design:** the player binds `0.0.0.0` with **no authentication**, so anyone
+> on your LAN can view the dashboard and reach `/plugin/calendar/data`, which serves your
+> calendar event titles/times as JSON. Keep it on a trusted network (or front it with a
+> reverse proxy + auth) if that data is sensitive.
 
 ## Configuration
 
@@ -297,10 +303,11 @@ Pi autologins and opens the dashboard fullscreen.
 
 ### Performance
 
-Software H.265 decode is the cost. A Pi 5 runs all streams in main/HD at ~1 of 4
-cores. On a Pi 4/3, set `default_stream: sub` in `cameras.yaml`, or use the
-sub-preview / HD-spotlight hybrid (previews on sub-streams, only the big pane on
-main). Manage the service with `systemctl {status,restart} dvri-peek` and view
+Software H.265 decode is the cost. The player already uses the sub-preview /
+HD-spotlight hybrid by default (previews on low-res sub-streams, only the selected
+big pane on main/HD), so a Pi 5 runs comfortably and a Pi 4/3 carries the load with
+just the one HD decode. Lower `target_fps` / `jpeg_quality` in `cameras.yaml` to
+trim further. Manage the service with `systemctl {status,restart} dvri-peek` and view
 logs with `journalctl -u dvri-peek -f`.
 
 ## Troubleshooting

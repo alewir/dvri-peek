@@ -22,8 +22,6 @@ gateway:
 
 player:
   http_port: 8090
-  default_stream: sub        # boot default before the UI connects; the UI then auto-tiers
-                             # (big-pane/selected lens -> main/HD, previews -> sub)
   jpeg_quality: 75
   target_fps: 15
 
