@@ -103,6 +103,16 @@ the camera's DVRIP.
   `rtsp_channel`). See `cameras.example.yaml`.
 - Performance lever: previews on sub, spotlight on main (≈1 main + N sub
   decodes).
+- **Tiered workers:** each lens runs an always-on SUB worker (`WORKERS[lid]`,
+  feeds previews) + an on-demand MAIN worker (`MAIN_WORKERS[lid]`, started for the
+  selected lens by `POST /api/streams {main:[…]}`, stopped on deselect). A worker is
+  single-tier for life and HOLDS its last frame across reconnects (never blanks once `ready`).
+- **Progressive big pane:** `/stream/<lens>` is sub; `?tier=main` routes to the main
+  worker. The big pane shows sub instantly, then swaps to `?tier=main` when `/status`
+  reports `main_ready` (live low-res → live HD, no blank).
+- **Bounded previews:** previews stay live, but hidden device tabs pause their streams
+  and `setMedia` closes old `<img>` connections on switch — keeps the browser under its
+  ~6-connection/host HTTP/1.1 limit (the cause of the earlier black-screens).
 
 ## 7. Player surface (HTTP)
 | Route | Purpose |
