@@ -68,3 +68,82 @@ def _weather(location):
             "code": cur["weather_code"], "text": text, "emoji": emoji,
             "today": {"hi": round(dy["temperature_2m_max"][0]), "lo": round(dy["temperature_2m_min"][0])},
             "forecast": forecast, "units": "°C"}
+
+def _parse_locale(loc):
+    parts = (loc or "pl-PL").replace("_", "-").split("-")
+    lang = parts[0] or "pl"
+    region = (parts[1] if len(parts) > 1 else lang).upper()
+    return lang, region
+
+def _local_feed(location, news_locale):
+    lang, region = _parse_locale(news_locale)
+    return ("https://news.google.com/rss/search?q=" + urllib.parse.quote(location)
+            + f"&hl={lang}&gl={region}&ceid={region}:{lang}")
+
+_EPOCH = datetime.min.replace(tzinfo=timezone.utc)
+
+def _parse_rss(text, default_source):
+    out = []
+    chan = ET.fromstring(text).find("channel")
+    if chan is None:
+        return out
+    ctitle = (chan.findtext("title") or default_source).strip()
+    for it in chan.findall("item"):
+        title = (it.findtext("title") or "").strip()
+        if not title:
+            continue
+        src = it.find("source")
+        source = src.text.strip() if (src is not None and src.text) else ctitle
+        when = None
+        pub = it.findtext("pubDate")
+        if pub:
+            try:
+                when = parsedate_to_datetime(pub)
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                when = None
+        out.append({"title": title, "source": source,
+                    "link": (it.findtext("link") or "").strip(),
+                    "published": when.astimezone(timezone.utc).isoformat() if when else None,
+                    "_sort": when or _EPOCH})
+    return out
+
+def _news(location, news_locale, news_feeds, cap, errors):
+    feeds = [(_local_feed(location, news_locale), "Local")] + [(u, "News") for u in (news_feeds or [])]
+    items = []
+    for url, label in feeds:
+        try:
+            items += _parse_rss(_http_get(url), label)
+        except Exception as e:  # noqa: BLE001
+            errors.append({"feed": url, "error": str(e)})
+    items.sort(key=lambda x: x["_sort"], reverse=True)
+    items = items[:cap]
+    for x in items:
+        del x["_sort"]
+    return items
+
+_DEFAULT_FEEDS = [
+    "https://news.google.com/rss/search?q=US%20stock%20market&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=GPW%20gie%C5%82da&hl=pl&gl=PL&ceid=PL:pl",
+]
+
+def fetch(config, now=None):
+    cfg = config or {}
+    location = (cfg.get("location") or "Warsaw").strip()
+    news_locale = cfg.get("news_locale") or "pl-PL"
+    news_feeds = cfg.get("news_feeds")
+    if news_feeds is None:
+        news_feeds = _DEFAULT_FEEDS
+    cap = _pos_int(cfg.get("max_news"), 10)
+    now = now or datetime.now(timezone.utc)
+    errors, weather = [], None
+    try:
+        weather = _weather(location)
+    except Exception as e:  # noqa: BLE001
+        errors.append({"weather": str(e)})
+    news = _news(location, news_locale, news_feeds, cap, errors)
+    out = {"weather": weather, "news": news, "generated": now.isoformat()}
+    if errors:
+        out["errors"] = errors
+    return out
