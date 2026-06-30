@@ -3,9 +3,10 @@
 # (causality): pointer-event divider, width-aware clamp, server-persisted split,
 # taller reveal-bar touch target, and the no-scrollbar small agenda.
 import importlib
-from pathlib import Path
 
 from layout import LayoutStore
+
+from tests.conftest import ROOT
 
 
 def _client(tmp_path, monkeypatch):
@@ -109,7 +110,7 @@ def test_revealbar_taller_touch_target_with_accent(tmp_path, monkeypatch):
 # --- Fix 3: small agenda fits the tile (no scrollbar vs clickcatch) ---
 
 def test_small_agenda_overflow_hidden_and_fixed_count():
-    h = Path("plugins/calendar/view.html").read_text()
+    h = (ROOT / "plugins" / "calendar" / "view.html").read_text()
     compact = h.replace(' ', '').replace('\n', '')
     # the small preview agenda no longer scrolls (clickcatch owns the whole tile)
     assert '.agenda{height:100%;overflow:hidden' in compact

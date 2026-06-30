@@ -1,16 +1,20 @@
 # tests/test_calendar.py
 import importlib.util
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
+
+from tests.conftest import ROOT
+
+FIXTURES = ROOT / "tests" / "fixtures"
 
 def _backend():
-    spec = importlib.util.spec_from_file_location("cal_backend", "plugins/calendar/backend.py")
+    spec = importlib.util.spec_from_file_location(
+        "cal_backend", str(ROOT / "plugins" / "calendar" / "backend.py"))
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
     return mod
 
 def test_parse_timed_and_allday():
     b = _backend()
-    evs = b.parse_ics(Path("tests/fixtures/cal_a.ics").read_text())
+    evs = b.parse_ics((FIXTURES / "cal_a.ics").read_text())
     s = {e["summary"]: e for e in evs}
     assert s["One Off"]["allday"] is False
     assert s["One Off"]["start"] == datetime(2026, 6, 29, 9, 0, tzinfo=timezone.utc)
@@ -18,7 +22,7 @@ def test_parse_timed_and_allday():
 
 def test_rrule_daily_count_expands():
     b = _backend()
-    evs = b.parse_ics(Path("tests/fixtures/cal_b.ics").read_text())
+    evs = b.parse_ics((FIXTURES / "cal_b.ics").read_text())
     w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
     w1 = w0 + timedelta(days=10)
     occ = [e for e in b.expand(evs, w0, w1) if e["summary"] == "Daily Standup"]
@@ -30,8 +34,8 @@ def test_rrule_daily_count_expands():
 
 def test_fetch_merges_sorts_colors(monkeypatch):
     b = _backend()
-    feeds = {"A": Path("tests/fixtures/cal_a.ics").read_text(),
-             "B": Path("tests/fixtures/cal_b.ics").read_text()}
+    feeds = {"A": (FIXTURES / "cal_a.ics").read_text(),
+             "B": (FIXTURES / "cal_b.ics").read_text()}
     monkeypatch.setattr(b, "_http_get", lambda url: feeds[url])
     out = b.fetch({"lookahead_days": 30,
                    "sources": [{"name": "A", "color": "#111", "ics_url": "A"},
@@ -81,15 +85,23 @@ def test_rrule_weekly_byday():
     dates = sorted(e["start"].date().isoformat() for e in occ)
     assert dates == ["2026-06-29", "2026-07-01", "2026-07-06", "2026-07-08"]
 
-def test_fetch_uses_broad_window_and_cap(monkeypatch):
+def test_fetch_uses_broad_window(monkeypatch):
     b = _backend()
-    # one event ~200 days out must be INCLUDED with the wide default lookahead
-    far = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:f\r\nSUMMARY:Far\r\n" \
-          "DTSTART:20270115T090000Z\r\nDTEND:20270115T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-    monkeypatch.setattr(b, "_http_get", lambda url: far)
+    # now=2026-06-28; default lookahead is 365d -> window ends 2027-06-28.
+    # An event at ~360d (2027-06-23) is IN; one at ~370d (2027-07-03) is OUT.
+    # This brackets the 365d default from both sides (locks it precisely).
+    feed = ("BEGIN:VCALENDAR\r\n"
+            "BEGIN:VEVENT\r\nUID:near\r\nSUMMARY:Near\r\n"
+            "DTSTART:20270623T090000Z\r\nDTEND:20270623T100000Z\r\nEND:VEVENT\r\n"
+            "BEGIN:VEVENT\r\nUID:far\r\nSUMMARY:Far\r\n"
+            "DTSTART:20270703T090000Z\r\nDTEND:20270703T100000Z\r\nEND:VEVENT\r\n"
+            "END:VCALENDAR\r\n")
+    monkeypatch.setattr(b, "_http_get", lambda url: feed)
     out = b.fetch({"sources": [{"name": "A", "color": "#111", "ics_url": "A"}]},
                   now=datetime(2026, 6, 28, tzinfo=timezone.utc))
-    assert any(e["title"] == "Far" for e in out["events"])     # 200d out, inside 365d window
+    titles = {e["title"] for e in out["events"]}
+    assert "Near" in titles        # ~360d out, inside the 365d default window
+    assert "Far" not in titles     # ~370d out, beyond it -> default is 365, not unbounded
     assert "errors" not in out
 
 def test_fetch_caps_at_max_events_grid(monkeypatch):
@@ -108,7 +120,7 @@ def test_fetch_caps_at_max_events_grid(monkeypatch):
 
 def test_allday_multiday_exclusive_end():
     b = _backend()
-    evs = b.parse_ics(Path("tests/fixtures/cal_multiday.ics").read_text())
+    evs = b.parse_ics((FIXTURES / "cal_multiday.ics").read_text())
     assert len(evs) == 1 and evs[0]["allday"] is True
     # DTSTART 07-03, DTEND 07-08 (exclusive) -> covers 07-03..07-07
     assert evs[0]["start"] == datetime(2026, 7, 3, tzinfo=timezone.utc)
@@ -141,7 +153,7 @@ def test_rrule_weekly_interval_zero_terminates():
 # ── BLOCKER 2: end-less all-day event covers exactly one day (RFC 5545) ───────
 def test_allday_endless_end_is_start_plus_one():
     b = _backend()
-    evs = b.parse_ics(Path("tests/fixtures/cal_endless_allday.ics").read_text())
+    evs = b.parse_ics((FIXTURES / "cal_endless_allday.ics").read_text())
     assert len(evs) == 1 and evs[0]["allday"] is True
     assert evs[0]["start"] == datetime(2026, 7, 4, tzinfo=timezone.utc)
     # no DTEND -> exclusive end is start + 1 day (so it never renders zero-width)
@@ -149,7 +161,7 @@ def test_allday_endless_end_is_start_plus_one():
 
 def test_fetch_includes_endless_allday(monkeypatch):
     b = _backend()
-    feed = Path("tests/fixtures/cal_endless_allday.ics").read_text()
+    feed = (FIXTURES / "cal_endless_allday.ics").read_text()
     monkeypatch.setattr(b, "_http_get", lambda url: feed)
     out = b.fetch({"sources": [{"name": "A", "color": "#111", "ics_url": "A"}]},
                   now=datetime(2026, 7, 1, tzinfo=timezone.utc))
@@ -171,7 +183,7 @@ def test_fetch_zero_config_falls_back_to_defaults(monkeypatch):
 
 def test_fetch_reports_max_events(monkeypatch):
     b = _backend()
-    feed = Path("tests/fixtures/cal_a.ics").read_text()
+    feed = (FIXTURES / "cal_a.ics").read_text()
     monkeypatch.setattr(b, "_http_get", lambda url: feed)
     base = {"sources": [{"name": "A", "color": "#111", "ics_url": "A"}]}
     now = datetime(2026, 6, 28, tzinfo=timezone.utc)
@@ -182,7 +194,7 @@ def test_fetch_reports_max_events(monkeypatch):
 # ── EXDATE: cancelled instances are suppressed, others remain ─────────────────
 def test_exdate_suppresses_one_occurrence():
     b = _backend()
-    evs = b.parse_ics(Path("tests/fixtures/cal_exdate.ics").read_text())
+    evs = b.parse_ics((FIXTURES / "cal_exdate.ics").read_text())
     w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
     occ = b.expand(evs, w0, w0 + timedelta(days=30))
     dates = sorted(e["start"].date().isoformat() for e in occ)
@@ -214,7 +226,7 @@ def test_exdate_parses_multiple_comma_values_with_tzid():
 # ── RECURRENCE-ID override: moved instance replaces the original occurrence ────
 def test_recurrence_id_override_replaces_occurrence():
     b = _backend()
-    evs = b.parse_ics(Path("tests/fixtures/cal_override.ics").read_text())
+    evs = b.parse_ics((FIXTURES / "cal_override.ics").read_text())
     w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
     occ = [e for e in b.expand(evs, w0, w0 + timedelta(days=10))
            if e["summary"] == "Daily Series"]
