@@ -1,7 +1,8 @@
 from plugins import PluginRegistry
+from tests.conftest import ROOT
 
 def test_clock_plugin_discovered():
-    reg = PluginRegistry("plugins")
+    reg = PluginRegistry(str(ROOT / "plugins"))
     reg.discover()
     p = reg.get("clock")
     assert p is not None and p.backend is None
