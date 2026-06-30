@@ -1,5 +1,6 @@
 # tests/test_ui_markup.py — server-rendered HTML contract for task-8 UI
 import importlib
+from tests.conftest import ROOT
 
 
 def _client(tmp_path, monkeypatch):
@@ -207,11 +208,21 @@ def test_active_header_js_preview_label_and_filler_status(tmp_path, monkeypatch)
 
 
 def test_stream_lifecycle_client_logic():
-    H = open("player.py").read()
+    H = (ROOT / "player.py").read_text()
     assert "function pauseHiddenStreams" in H          # hidden-tab pause exists
     assert "dataset.psrc" in H                          # paused src is stashed/restored
     assert "pauseHiddenStreams()" in H                  # called (showTab/loadState)
     assert "?tier=main" in H                            # big-pane sub->main swap target
     assert "main_ready" in H                            # swap gated on main_ready
-    # teardown: setMedia clears old <img> src before replacing
-    assert "querySelectorAll('img')" in H and "i.src=''" in H
+    # teardown: setMedia force-closes the old MJPEG socket before replacing
+    # ('data:,' is reliable in Chromium; '' can leave the socket half-open → switch stall)
+    assert "querySelectorAll('img')" in H and "i.src='data:,'" in H
+    assert "img.src=''" not in H                         # no unreliable close left anywhere
+
+
+def test_grid_cell_fits_no_scroll():
+    # NVR grid: a single full-width cell must fit the panel, not force a 16:9 box taller
+    # than the viewport (which produced a vertical scrollbar)
+    H = (ROOT / "player.py").read_text()
+    assert "grid-auto-rows:1fr" in H                     # cells share the grid height
+    assert "aspect-ratio:16/9" not in H                  # no fixed aspect that overflows

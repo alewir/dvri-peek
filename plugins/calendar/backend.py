@@ -1,6 +1,10 @@
 # plugins/calendar/backend.py — merged multi-calendar agenda from secret ICS feeds.
 # Stdlib only. Recurrence: non-recurring always; FREQ=DAILY|WEEKLY (INTERVAL,COUNT,
 # UNTIL, weekly BYDAY) expanded in-window; MONTHLY/YEARLY -> original occurrence only.
+# EXDATE (cancelled instances) and RECURRENCE-ID overrides (moved/modified instances)
+# are honored: EXDATE'd occurrences are dropped; an occurrence matching another VEVENT's
+# (UID, RECURRENCE-ID) is suppressed (that override VEVENT is emitted via the non-recurring
+# path). No-COUNT DAILY/WEEKLY series fast-forward to window_start; COUNT counts from DTSTART.
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -48,7 +52,8 @@ def parse_ics(text):
     events, cur = [], None
     for line in _unfold(text):
         if line == "BEGIN:VEVENT":
-            cur = {"summary": "", "start": None, "end": None, "allday": False, "rrule": None}
+            cur = {"summary": "", "start": None, "end": None, "allday": False, "rrule": None,
+                   "uid": "", "recurrence_id": None, "exdate": set()}
         elif line == "END:VEVENT":
             if cur and cur["start"] is not None:
                 # RFC 5545: an all-day (DATE) event with no/zero-length DTEND covers
@@ -70,6 +75,14 @@ def parse_ics(text):
                 cur["end"], _ = _parse_dt(value, params)
             elif key == "RRULE":
                 cur["rrule"] = dict(kv.split("=", 1) for kv in value.split(";") if "=" in kv)
+            elif key == "UID":
+                cur["uid"] = value
+            elif key == "RECURRENCE-ID":
+                cur["recurrence_id"], _ = _parse_dt(value, params)
+            elif key == "EXDATE":
+                for v in value.split(","):
+                    if v:
+                        cur["exdate"].add(_parse_dt(v, params)[0])
     return events
 
 def _rrule_until(rule):
@@ -82,6 +95,10 @@ def _rrule_until(rule):
     return None
 
 def expand(events, window_start, window_end):
+    # (uid, recurrence_id) of every override VEVENT — the matching generated occurrence
+    # of the recurring series is suppressed (the override itself rides the non-recurring path).
+    overrides = {(e.get("uid", ""), e["recurrence_id"])
+                 for e in events if e.get("recurrence_id") is not None}
     out = []
     for e in events:
         rule = e.get("rrule")
@@ -90,15 +107,27 @@ def expand(events, window_start, window_end):
             if e["start"] <= window_end and (e.get("end") or e["start"]) >= window_start:
                 out.append({**e, "end": e["start"] + dur})
             continue
+        uid = e.get("uid", "")
+        exdates = e.get("exdate") or ()
         freq = rule.get("FREQ")
         interval = _pos_int(rule.get("INTERVAL"), 1)
         count = int(rule["COUNT"]) if "COUNT" in rule else None
         until = _rrule_until(rule)
         emitted = 0
+
+        def _keep(occ):
+            return occ not in exdates and (uid, occ) not in overrides
+
         if freq == "DAILY":
             cur = e["start"]; step = timedelta(days=interval)
+            # No COUNT: arithmetically jump to the first occurrence >= window_start so we
+            # don't iterate across all history. COUNT must count from DTSTART -> no jump.
+            if count is None and cur < window_start:
+                cur += ((window_start - cur) // step) * step
+                if cur < window_start:
+                    cur += step
             while cur <= window_end and (until is None or cur <= until):
-                if cur >= window_start:
+                if cur >= window_start and _keep(cur):
                     out.append({**e, "start": cur, "end": cur + dur, "rrule": None})
                 emitted += 1
                 if count and emitted >= count:
@@ -110,6 +139,14 @@ def expand(events, window_start, window_end):
                 bydays = [e["start"].weekday()]
             week0 = e["start"] - timedelta(days=e["start"].weekday())
             wk = 0
+            # No COUNT: skip whole weeks ending before window_start (last weekday = base+6d).
+            if count is None:
+                week_step = timedelta(weeks=interval)
+                target = window_start - timedelta(days=6)
+                if week0 < target:
+                    wk = (target - week0) // week_step
+                    if week0 + wk * week_step < target:
+                        wk += 1
             while True:
                 base = week0 + timedelta(weeks=wk * interval)
                 if base > window_end or (until and base > until):
@@ -123,7 +160,7 @@ def expand(events, window_start, window_end):
                         continue
                     if occ > window_end:
                         continue
-                    if occ >= window_start:
+                    if occ >= window_start and _keep(occ):
                         out.append({**e, "start": occ, "end": occ + dur, "rrule": None})
                     emitted += 1
                     if count and emitted >= count:
@@ -132,7 +169,7 @@ def expand(events, window_start, window_end):
                     break
                 wk += 1
         else:  # MONTHLY/YEARLY/unknown -> original occurrence only
-            if window_start <= e["start"] <= window_end:
+            if window_start <= e["start"] <= window_end and _keep(e["start"]):
                 out.append({**e, "end": e["start"] + dur, "rrule": None})
     return out
 

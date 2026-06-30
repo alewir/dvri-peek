@@ -14,7 +14,7 @@ decodes each stream with OpenCV and serves a web UI:
 
 RTP is carried over TCP everywhere (WSL2 NAT drops UDP RTP return packets).
 
-Usage:  python player.py [--config cameras.yaml] [--stream sub|main] [--port N]
+Usage:  python player.py [--config cameras.yaml] [--port N]
 Open    http://localhost:<port>
 """
 import os
@@ -181,6 +181,8 @@ class LensWorker(threading.Thread):
                 if not self.ready:                   # hold last frame if we ever had one
                     self.status = "no signal / needs credentials"
                     self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
+                else:
+                    self.status = "reconnecting (" + self.tier + ")"
                 cap.release()
                 if self._stop.wait(3.0):
                     break
@@ -196,6 +198,8 @@ class LensWorker(threading.Thread):
                         if not self.ready:
                             self.status = "no signal / needs credentials"
                             self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
+                        else:
+                            self.status = "reconnecting (" + self.tier + ")"
                         break                        # reconnect; ready -> last frame stays
                     time.sleep(0.05)
                     continue
@@ -288,7 +292,7 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .tile.active{outline:2px solid var(--accent);outline-offset:-2px;cursor:default}
  .tname{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .tmeta{flex:0 0 auto;white-space:nowrap;font-size:10px;color:#9ca3af;font-variant-numeric:tabular-nums}
- /* active tile = 3-zone strip: name (left) · [preview: filler] (center, muted) · status (right) */
+ /* active tile = 3-zone strip: name (left) · [preview: filler] (left-grouped after the name, muted) · status (right, margin-left:auto) */
  .tpreview{flex:0 99 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
    font-size:10px;font-weight:500;color:#8b8b93}
  .tpreview:empty{display:none}
@@ -303,8 +307,10 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .dot{width:8px;height:8px;border-radius:50%;background:#888;display:inline-block;margin-right:5px}
  .on{background:#22c55e}.off{background:#ef4444}.wait{background:#eab308}
  /* grid */
- .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));flex:1 1 auto;min-height:0;overflow:auto;align-content:start}
- .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;aspect-ratio:16/9}
+ /* cells fill the grid area (rows share height) — a single NVR cell must fit the panel,
+    not force a 16:9 box taller than the viewport (which caused a vertical scrollbar) */
+ .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));grid-auto-rows:1fr;flex:1 1 auto;min-height:0;overflow:hidden}
+ .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
  /* collapsible header */
  header.collapsed{display:none}
  /* thin 6px visual accent (::before) inside a taller transparent ~24px touch target */
@@ -337,47 +343,58 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
 
 
 def _tile_media(source_id, ctx):
-    """Return inner media HTML for a source in a given context (tile/main/filler)."""
+    """Return inner media HTML for a source in a given context (tile/main/filler).
+    ids are raw config strings → html.escape(quote=True) at every interpolation point
+    (names already escaped); mirrors the client esc()."""
     if source_id and source_id.startswith("plugin:"):
-        pid = source_id.split(":", 1)[1]
+        pid = html.escape(source_id.split(":", 1)[1], quote=True)
+        # sandbox keeps allow-same-origin (plugins read their own /plugin/<id>/data) AND
+        # allow-scripts: that combo lets a frame clear its own sandbox, so it is NOT a
+        # security boundary here. Acceptable because plugins are TRUSTED first-party code
+        # shipped in-repo, not third-party/user content.
         return (f'<iframe class="pluginframe" src="/plugin/{pid}/view?ctx={ctx}"'
                 f' frameborder="0" sandbox="allow-scripts allow-same-origin"></iframe>')
-    return f'<img class="cam" data-id="{source_id}" src="/stream/{source_id}">'
+    sid = html.escape(source_id, quote=True)
+    return f'<img class="cam" data-id="{sid}" src="/stream/{sid}">'
 
 
 def render_spotlight(dev):
     lenses = dev["lenses"]
     first = lenses[0]["id"]
+    did = html.escape(dev["id"], quote=True)
     thumbs = ""
     for ln in lenses:
         lid, lname = ln["id"], ln.get("name", ln["id"])
+        eid = html.escape(lid, quote=True)
         thumbs += f"""
-        <div class="tile" id="th-{lid}" data-lens="{lid}" data-slot="{lid}" data-source="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
-          <div class="tilehead" id="tilehead-{lid}"><span class="tname">{html.escape(lname)}</span><span class="tpreview"></span><span class="tmeta"></span></div>
-          <div class="tmediadiv" id="tmedia-{lid}">{_tile_media(lid, "tile")}</div>
+        <div class="tile" id="th-{eid}" data-lens="{eid}" data-slot="{eid}" data-source="{eid}" data-dev="{did}" onclick="promote('{did}','{eid}')">
+          <div class="tilehead" id="tilehead-{eid}"><span class="tname">{html.escape(lname)}</span><span class="tpreview"></span><span class="tmeta"></span></div>
+          <div class="tmediadiv" id="tmedia-{eid}">{_tile_media(lid, "tile")}</div>
           <div class="clickcatch"></div>
-          <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
+          <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{eid}" data-dev="{did}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
         </div>"""
     return f"""
-    <div class="spot" id="spot-{dev['id']}">
+    <div class="spot" id="spot-{did}">
       <div class="big">
-        <div class="cap" id="bigcap-{dev['id']}">{html.escape(lenses[0].get('name',''))}</div>
-        <div class="bigmedia" id="bigmedia-{dev['id']}">{_tile_media(first, "main")}</div>
+        <div class="cap" id="bigcap-{did}">{html.escape(lenses[0].get('name',''))}</div>
+        <div class="bigmedia" id="bigmedia-{did}">{_tile_media(first, "main")}</div>
       </div>
-      <div class="divider" data-dev="{dev['id']}" title="Drag to resize">⋮</div>
+      <div class="divider" data-dev="{did}" title="Drag to resize">⋮</div>
       <div class="thumbs">{thumbs}</div>
     </div>"""
 
 
 def render_grid(dev):
+    did = html.escape(dev["id"], quote=True)
     cells = ""
     for ln in dev["lenses"]:
         lid, lname = ln["id"], ln.get("name", ln["id"])
+        eid = html.escape(lid, quote=True)
         cells += f"""
-        <div class="cell" data-source="{lid}" data-slot="{lid}" data-dev="{dev['id']}">
+        <div class="cell" data-source="{eid}" data-slot="{eid}" data-dev="{did}">
           <div class="tilehead"><span class="tname">{html.escape(lname)}</span><span class="tmeta"></span></div>
           <div class="tmediadiv">{_tile_media(lid, "tile")}</div>
-          <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
+          <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{eid}" data-dev="{did}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
         </div>"""
     return f'<div class="grid">{cells}</div>'
 
@@ -388,9 +405,10 @@ def index():
     panes = ""
     for i, dev in enumerate(DEVICES):
         active = " active" if i == 0 else ""
-        tabs += f'<button class="tab{active}" data-dev="{dev["id"]}" onclick="showTab(\'{dev["id"]}\')">{html.escape(dev["name"])}</button>'
+        did = html.escape(dev["id"], quote=True)
+        tabs += f'<button class="tab{active}" data-dev="{did}" onclick="showTab(\'{did}\')">{html.escape(dev["name"])}</button>'
         body = render_spotlight(dev) if dev.get("layout") == "spotlight" else render_grid(dev)
-        panes += f'<div class="device{active}" id="dev-{dev["id"]}">{body}</div>'
+        panes += f'<div class="device{active}" id="dev-{did}">{body}</div>'
     head = PAGE_HEAD
     controls = ('<div class="right">'
                 '<button class="sbtn" id="gear" onclick="toggleSettings()">&#9881;</button>'
@@ -407,7 +425,8 @@ function pauseHiddenStreams(){
       if(active){
         if(img.dataset.psrc){ img.src=img.dataset.psrc; delete img.dataset.psrc; }
       } else if(img.getAttribute('src')){
-        img.dataset.psrc=img.getAttribute('src'); img.src='';
+        // 'data:,' (not '') reliably aborts the MJPEG socket in Chromium; '' can leave it half-open
+        img.dataset.psrc=img.getAttribute('src'); img.src='data:,';
       }
     });
   });
@@ -476,7 +495,7 @@ function resolveSrc(id,def){return (id&&srcKnown(id))?id:def;}
 function setMedia(el,html){
   if(!el) return;
   if(el.dataset.mkey!==html){
-    el.querySelectorAll('img').forEach(i=>{ i.src=''; });  // close old MJPEG conn before swap
+    el.querySelectorAll('img').forEach(i=>{ i.src='data:,'; });  // force-close old MJPEG socket before swap ('' can linger in Chromium)
     el.innerHTML=html; el.dataset.mkey=html;
   }
 }
@@ -559,10 +578,10 @@ function applyAssignments(){
           fillPicker(picker,isActive?(filler||''):assignedSrc,isActive);
           picker.onchange=isActive
             ?()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
-                   LAYOUT.devices[dev].filler=picker.value||null; applyAssignments(); saveLayout(); }
+                   LAYOUT.devices[dev].filler=picker.value||null; applyAssignments(); saveLayout(); pauseHiddenStreams(); }
             :()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
                    LAYOUT.devices[dev].tiles=LAYOUT.devices[dev].tiles||{};
-                   LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); saveLayout(); };
+                   LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); saveLayout(); pauseHiddenStreams(); };
         }
       });
     }
@@ -579,7 +598,7 @@ function applyAssignments(){
         fillPicker(picker,assignedSrc);
         picker.onchange=()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
           LAYOUT.devices[dev].tiles=LAYOUT.devices[dev].tiles||{};
-          LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); saveLayout(); };
+          LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); saveLayout(); pauseHiddenStreams(); };
       }
     });
   });
@@ -593,13 +612,20 @@ function promote(dev,lid){
   LAYOUT.devices[dev].selected=lid;
   saveLayout();
   applyAssignments();
+  pauseHiddenStreams();  // defensive: never leave a hidden-tab <img> streaming
 }
 function initDivider(dev){
   const sp=document.getElementById('spot-'+dev); if(!sp) return;
   const big=sp.querySelector('.big'); const div=sp.querySelector('.divider');
+  // width-aware clamp: ceiling keeps the thumbnail column (150px min) + divider box
+  // (26px: 16 flex-basis + 2×5 margin) on-screen so its dots/res/fps are never clipped;
+  // the 25% floor is itself capped under that ceiling (lo) so a narrow viewport can't
+  // produce floor>ceiling (which would pin the big pane wider than intended).
+  const clampPct=pct=>{const r=sp.getBoundingClientRect();const maxPct=(r.width-150-26)/r.width*100;
+    const lo=Math.min(25,maxPct);return Math.max(lo,Math.min(Math.min(85,maxPct),pct));};
   // restore the split from server-side layout state (per device), not browser storage
   const saved=LAYOUT.devices&&LAYOUT.devices[dev]&&LAYOUT.devices[dev].split;
-  if(saved) big.style.flexBasis=saved;
+  if(saved){const p=parseFloat(saved); big.style.flexBasis=isFinite(p)?clampPct(p).toFixed(1)+'%':saved;}
   let dragging=false;
   // Pointer events (mouse AND touch). setPointerCapture routes every subsequent
   // pointermove/up to the divider — even while the cursor is over the big-pane
@@ -608,10 +634,7 @@ function initDivider(dev){
     div.setPointerCapture(e.pointerId);document.body.style.userSelect='none';e.preventDefault();});
   div.addEventListener('pointermove',e=>{
     if(!dragging)return; const r=sp.getBoundingClientRect();
-    // width-aware ceiling: keep the thumbnail column (150px min) + divider box (26px:
-    // 16 flex-basis + 2×5 margin) on-screen so its status dots/res/fps are never clipped
-    const maxPct=(r.width-150-26)/r.width*100;
-    let pct=(e.clientX-r.left)/r.width*100; pct=Math.max(25,Math.min(Math.min(85,maxPct),pct));
+    const pct=clampPct((e.clientX-r.left)/r.width*100);
     big.style.flexBasis=pct.toFixed(1)+'%';
   });
   div.addEventListener('pointerup',e=>{
@@ -638,7 +661,10 @@ async function poll(){
       const c=statusMap[src];
       if(!c){m.innerHTML='<span class="dot off"></span>';return;}
       const on=c.status.startsWith('online');
-      m.innerHTML='<span class="dot '+(on?'on':(c.status==='connecting'?'wait':'off'))+'"></span>'+
+      // yellow wait dot for both the initial "connecting" and the post-ready "reconnecting"
+      // hold-last-frame state (camera dropped but we're still showing its last frame)
+      const wait=c.status==='connecting'||c.status.startsWith('reconnecting');
+      m.innerHTML='<span class="dot '+(on?'on':(wait?'wait':'off'))+'"></span>'+
                   (on?c.resolution+' '+c.fps+'f':'');
     });
     // progressive big-pane upgrade: once a lens's main worker has frames, swap sub -> main
@@ -718,7 +744,7 @@ def api_streams():
     return jsonify({"ok": True})
 
 
-def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gateway=True,
+def bootstrap(config_path=None, start_workers=True, start_gateway=True,
               plugins_dir=None, state_path=None, secrets_path=None):
     global CFG, DEVICES, REGISTRY, STORE
     here = os.path.dirname(os.path.abspath(__file__))
@@ -726,7 +752,6 @@ def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gate
     CFG = load_config(config_path)
     DEVICES = CFG["devices"]
     pl = CFG.get("player", {})
-    mode = stream_mode or pl.get("default_stream", "sub")
 
     secrets = load_secrets(secrets_path or os.path.join(here, "secrets.local.yaml"))
     REGISTRY = plugins_mod.PluginRegistry(plugins_dir or os.path.join(here, "plugins"), secrets=secrets)
@@ -754,19 +779,17 @@ def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gate
                            pl.get("target_fps", 15), "sub")
             WORKERS[lid] = w
             w.start()
-    return mode
 
 
 def main():
     ap = argparse.ArgumentParser()
     here = os.path.dirname(os.path.abspath(__file__))
     ap.add_argument("--config", default=os.path.join(here, "cameras.yaml"))
-    ap.add_argument("--stream", choices=["sub", "main"], default=None)
     ap.add_argument("--port", type=int, default=None)
     args = ap.parse_args()
-    mode = bootstrap(config_path=args.config, stream_mode=args.stream)
+    bootstrap(config_path=args.config)
     port = args.port or CFG.get("player", {}).get("http_port", 8090)
-    print(f"Player: http://localhost:{port}   (stream={mode})")
+    print(f"Player: http://localhost:{port}")
     try:
         app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
     finally:
