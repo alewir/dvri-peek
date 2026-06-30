@@ -40,38 +40,45 @@ def _setup(tmp_path, monkeypatch):
     return player.app.test_client(), w1, w2
 
 
-def test_api_streams_sets_named_lens_to_main_others_sub(tmp_path, monkeypatch):
-    c, w1, w2 = _setup(tmp_path, monkeypatch)
-    rv = c.post("/api/streams", json={"main": ["lens1"]})
-    assert rv.status_code == 200
-    assert rv.get_json() == {"ok": True}
-    assert w1.stream_mode == "main"
-    assert w2.stream_mode == "sub"
-
-
-def test_api_streams_empty_main_demotes_all(tmp_path, monkeypatch):
-    c, w1, w2 = _setup(tmp_path, monkeypatch)
-    # prime lens1 to main, then demote all
-    c.post("/api/streams", json={"main": ["lens1"]})
-    rv = c.post("/api/streams", json={"main": []})
-    assert rv.status_code == 200
-    assert w1.stream_mode == "sub"
-    assert w2.stream_mode == "sub"
-
-
-def test_api_streams_switches_main_between_lenses(tmp_path, monkeypatch):
-    c, w1, w2 = _setup(tmp_path, monkeypatch)
-    c.post("/api/streams", json={"main": ["lens1"]})
-    c.post("/api/streams", json={"main": ["lens2"]})
-    assert w1.stream_mode == "sub"
-    assert w2.stream_mode == "main"
-
-
 def test_old_set_stream_route_removed(tmp_path, monkeypatch):
     """The global /set_stream route must no longer exist."""
     c, _, _ = _setup(tmp_path, monkeypatch)
     rv = c.get("/set_stream?mode=main")
     assert rv.status_code == 404
+
+
+def _boot_no_workers(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "cameras.yaml").write_text(
+        "gateway: {}\nplayer: {}\ndevices:\n  - id: cam\n    name: Cam\n    layout: spotlight\n"
+        "    host: 1.2.3.4\n    lenses:\n      - {id: lens1, name: L1, channel: 0}\n"
+        "      - {id: lens2, name: L2, channel: 1}\n")
+    (tmp_path / "plugins").mkdir()
+    import importlib, player
+    importlib.reload(player)
+    player.bootstrap(config_path="cameras.yaml", start_workers=False, start_gateway=False,
+                     plugins_dir=str(tmp_path / "plugins"),
+                     state_path=str(tmp_path / "s.json"), secrets_path=str(tmp_path / "x.yaml"))
+    return player
+
+
+def test_api_streams_starts_and_stops_main(tmp_path, monkeypatch):
+    player = _boot_no_workers(tmp_path, monkeypatch)
+    class Fake:
+        def __init__(s, lid, *a): s.id = lid; s.started = False; s.stopped = False; s.ready = False
+        def start(s): s.started = True
+        def stop(s): s.stopped = True
+    monkeypatch.setattr(player, "LensWorker", Fake)
+    player.WORKERS.clear(); player.MAIN_WORKERS.clear()
+    player.WORKERS["lens1"] = Fake("lens1"); player.WORKERS["lens2"] = Fake("lens2")
+    player.LENS_META.update({"lens1": {"name": "L1"}, "lens2": {"name": "L2"}})
+    c = player.app.test_client()
+    c.post("/api/streams", json={"main": ["lens1"]})
+    assert "lens1" in player.MAIN_WORKERS and player.MAIN_WORKERS["lens1"].started
+    assert "lens2" not in player.MAIN_WORKERS
+    m1 = player.MAIN_WORKERS["lens1"]
+    c.post("/api/streams", json={"main": []})
+    assert "lens1" not in player.MAIN_WORKERS and m1.stopped
 
 
 def test_lensworker_tier_url_and_ready():

@@ -221,10 +221,28 @@ class LensWorker(threading.Thread):
 # --------------------------------------------------------------------------- #
 app = Flask(__name__)
 CFG = None
-WORKERS = {}        # lens_id -> LensWorker
-DEVICES = []        # config devices (for rendering)
+WORKERS = {}          # lens_id -> always-on SUB worker
+MAIN_WORKERS = {}     # lens_id -> on-demand MAIN worker (only while selected)
+LENS_META = {}        # lens_id -> {"name": str}
+DEVICES = []          # config devices (for rendering)
 REGISTRY = None
 STORE = None
+
+
+def _start_main_worker(lid):
+    if lid in MAIN_WORKERS or lid not in LENS_META:
+        return
+    pl = CFG.get("player", {}); gw = CFG.get("gateway", {})
+    w = LensWorker(lid, LENS_META[lid]["name"], gw,
+                   pl.get("jpeg_quality", 75), pl.get("target_fps", 15), "main")
+    MAIN_WORKERS[lid] = w
+    w.start()
+
+
+def _stop_main_worker(lid):
+    w = MAIN_WORKERS.pop(lid, None)
+    if w:
+        w.stop()
 
 
 def load_secrets(path):
@@ -648,8 +666,12 @@ def status():
 def api_streams():
     data = request.get_json(force=True, silent=True) or {}
     main_set = set(data.get("main", []))
-    for w in WORKERS.values():
-        w.set_stream("main" if w.id in main_set else "sub")
+    for lid in main_set:
+        if lid in WORKERS:
+            _start_main_worker(lid)
+    for lid in list(MAIN_WORKERS):
+        if lid not in main_set:
+            _stop_main_worker(lid)
     return jsonify({"ok": True})
 
 
@@ -680,11 +702,13 @@ def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gate
     else:
         lens_index = {ln["id"]: {"name": ln.get("name", ln["id"])}
                       for dev in DEVICES for ln in dev["lenses"]}
+    for lid, meta in lens_index.items():
+        LENS_META[lid] = {"name": meta["name"]}
     if start_workers:
         gw = CFG.get("gateway", {})
         for lid, meta in lens_index.items():
             w = LensWorker(lid, meta["name"], gw, pl.get("jpeg_quality", 75),
-                           pl.get("target_fps", 15), mode)  # tier = mode (default stream)
+                           pl.get("target_fps", 15), "sub")
             WORKERS[lid] = w
             w.start()
     return mode
