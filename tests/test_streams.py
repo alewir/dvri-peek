@@ -3,12 +3,9 @@ import importlib
 
 
 class _FakeWorker:
-    """Minimal stand-in for LensWorker: records set_stream calls."""
+    """Minimal stand-in for LensWorker."""
     def __init__(self, wid, mode="sub"):
         self.id = wid
-        self._mode = mode
-
-    def set_stream(self, mode):
         self._mode = mode
 
     @property
@@ -78,6 +75,25 @@ def test_api_streams_starts_and_stops_main(tmp_path, monkeypatch):
     assert "lens2" not in player.MAIN_WORKERS
     m1 = player.MAIN_WORKERS["lens1"]
     c.post("/api/streams", json={"main": []})
+    assert "lens1" not in player.MAIN_WORKERS and m1.stopped
+
+
+def test_api_streams_switches_main_between_lenses(tmp_path, monkeypatch):
+    # switching the selected lens must start the new main AND stop the old one in one request
+    player = _boot_no_workers(tmp_path, monkeypatch)
+    class Fake:
+        def __init__(s, lid, *a): s.id = lid; s.started = False; s.stopped = False; s.ready = False
+        def start(s): s.started = True
+        def stop(s): s.stopped = True
+    monkeypatch.setattr(player, "LensWorker", Fake)
+    player.WORKERS.clear(); player.MAIN_WORKERS.clear()
+    player.WORKERS["lens1"] = Fake("lens1"); player.WORKERS["lens2"] = Fake("lens2")
+    player.LENS_META.update({"lens1": {"name": "L1"}, "lens2": {"name": "L2"}})
+    c = player.app.test_client()
+    c.post("/api/streams", json={"main": ["lens1"]})
+    m1 = player.MAIN_WORKERS["lens1"]
+    c.post("/api/streams", json={"main": ["lens2"]})        # switch lens1 -> lens2
+    assert "lens2" in player.MAIN_WORKERS and player.MAIN_WORKERS["lens2"].started
     assert "lens1" not in player.MAIN_WORKERS and m1.stopped
 
 

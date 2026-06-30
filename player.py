@@ -224,23 +224,28 @@ CFG = None
 WORKERS = {}          # lens_id -> always-on SUB worker
 MAIN_WORKERS = {}     # lens_id -> on-demand MAIN worker (only while selected)
 LENS_META = {}        # lens_id -> {"name": str}
+_MAIN_LOCK = threading.Lock()   # guards MAIN_WORKERS start/stop (Flask runs threaded)
 DEVICES = []          # config devices (for rendering)
 REGISTRY = None
 STORE = None
 
 
 def _start_main_worker(lid):
-    if lid in MAIN_WORKERS or lid not in LENS_META:
-        return
-    pl = CFG.get("player", {}); gw = CFG.get("gateway", {})
-    w = LensWorker(lid, LENS_META[lid]["name"], gw,
-                   pl.get("jpeg_quality", 75), pl.get("target_fps", 15), "main")
-    MAIN_WORKERS[lid] = w
+    # lock the check+insert so two concurrent /api/streams POSTs can't both pass the
+    # guard and leak a duplicate thread for the same lens. start() runs outside the lock.
+    with _MAIN_LOCK:
+        if lid in MAIN_WORKERS or lid not in LENS_META:
+            return
+        pl = CFG.get("player", {}); gw = CFG.get("gateway", {})
+        w = LensWorker(lid, LENS_META[lid]["name"], gw,
+                       pl.get("jpeg_quality", 75), pl.get("target_fps", 15), "main")
+        MAIN_WORKERS[lid] = w
     w.start()
 
 
 def _stop_main_worker(lid):
-    w = MAIN_WORKERS.pop(lid, None)
+    with _MAIN_LOCK:
+        w = MAIN_WORKERS.pop(lid, None)
     if w:
         w.stop()
 
@@ -728,6 +733,8 @@ def main():
         app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
     finally:
         for w in WORKERS.values():
+            w.stop()
+        for w in MAIN_WORKERS.values():
             w.stop()
         stop_go2rtc()
 
