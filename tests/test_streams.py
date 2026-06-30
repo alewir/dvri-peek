@@ -72,3 +72,16 @@ def test_old_set_stream_route_removed(tmp_path, monkeypatch):
     c, _, _ = _setup(tmp_path, monkeypatch)
     rv = c.get("/set_stream?mode=main")
     assert rv.status_code == 404
+
+
+def test_lensworker_tier_url_and_ready():
+    import importlib, player
+    importlib.reload(player)
+    gw = {"api_host": "127.0.0.1", "rtsp_port": 8554}
+    main = player.LensWorker("lens1", "L1", gw, 75, 15, "main")
+    assert main.tier == "main" and main.stream_mode == "main"
+    assert main.url().endswith("/lens1_main")
+    assert main.ready is False
+    sub = player.LensWorker("lens1", "L1", gw, 75, 15, "sub")
+    assert sub.tier == "sub" and sub.url().endswith("/lens1")
+    assert not hasattr(sub, "set_stream")   # mode-switching removed

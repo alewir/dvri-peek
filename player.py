@@ -128,7 +128,7 @@ def stop_go2rtc():
 #  Per-lens grabber (reads go2rtc's RTSP restream)
 # --------------------------------------------------------------------------- #
 class LensWorker(threading.Thread):
-    def __init__(self, lens_id, name, gw, jpeg_quality, target_fps, stream_mode):
+    def __init__(self, lens_id, name, gw, jpeg_quality, target_fps, tier):
         super().__init__(daemon=True)
         self.id = lens_id
         self.name = name
@@ -136,27 +136,22 @@ class LensWorker(threading.Thread):
         self._rtsp_port = gw.get("rtsp_port", 8554)
         self.jpeg_quality = jpeg_quality
         self.min_period = 1.0 / max(target_fps, 1)
-        self._mode = stream_mode
+        self.tier = tier                 # "sub" | "main" — fixed for this worker's life
         self._lock = threading.Lock()
         self._jpeg = None
         self._stop = threading.Event()
-        self._reconnect = threading.Event()
+        self.ready = False               # True once >=1 real frame decoded
         self.status = "connecting"
         self.resolution = "-"
         self.fps = 0.0
 
     def url(self):
-        name = self.id if self._mode == "sub" else f"{self.id}_main"
+        name = self.id if self.tier == "sub" else f"{self.id}_main"
         return f"rtsp://{self._rtsp_host}:{self._rtsp_port}/{name}"
-
-    def set_stream(self, mode):
-        if mode in SUBTYPE and mode != self._mode:
-            self._mode = mode
-            self._reconnect.set()
 
     @property
     def stream_mode(self):
-        return self._mode
+        return self.tier
 
     def stop(self):
         self._stop.set()
@@ -177,45 +172,46 @@ class LensWorker(threading.Thread):
     def run(self):
         enc = [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
         while not self._stop.is_set():
-            self._placeholder([self.name, "connecting..."])
-            self.status = "connecting"
+            if not self.ready:                       # only blank BEFORE the first frame
+                self._placeholder([self.name, "connecting..."])
+                self.status = "connecting"
             cap = cv2.VideoCapture(self.url(), cv2.CAP_FFMPEG)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             if not cap.isOpened():
-                self.status = "no signal / needs credentials"
-                self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
+                if not self.ready:                   # hold last frame if we ever had one
+                    self.status = "no signal / needs credentials"
+                    self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
                 cap.release()
                 if self._stop.wait(3.0):
                     break
                 continue
-            self._reconnect.clear()
             fail = 0
             t_prev = time.time()
             fps_ema = 0.0
-            while not self._stop.is_set() and not self._reconnect.is_set():
+            while not self._stop.is_set():
                 ok, frame = cap.read()
                 if not ok or frame is None:
                     fail += 1
                     if fail > 40:
-                        self.status = "no signal / needs credentials"
-                        self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
-                        break
+                        if not self.ready:
+                            self.status = "no signal / needs credentials"
+                            self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
+                        break                        # reconnect; ready -> last frame stays
                     time.sleep(0.05)
                     continue
                 fail = 0
-                now = time.time()
-                dt = now - t_prev
-                t_prev = now
+                now = time.time(); dt = now - t_prev; t_prev = now
                 if dt > 0:
                     fps_ema = 0.9 * fps_ema + 0.1 / dt if fps_ema else 1.0 / dt
                 self.fps = round(fps_ema, 1)
                 h, w = frame.shape[:2]
                 self.resolution = f"{w}x{h}"
-                self.status = f"online ({self._mode})"
+                self.status = f"online ({self.tier})"
                 ok2, buf = cv2.imencode(".jpg", frame, enc)
                 if ok2:
                     with self._lock:
                         self._jpeg = buf.tobytes()
+                    self.ready = True                # first real frame
                 time.sleep(self.min_period * 0.5)
             cap.release()
 
@@ -688,7 +684,7 @@ def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gate
         gw = CFG.get("gateway", {})
         for lid, meta in lens_index.items():
             w = LensWorker(lid, meta["name"], gw, pl.get("jpeg_quality", 75),
-                           pl.get("target_fps", 15), mode)
+                           pl.get("target_fps", 15), mode)  # tier = mode (default stream)
             WORKERS[lid] = w
             w.start()
     return mode
