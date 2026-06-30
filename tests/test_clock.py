@@ -40,6 +40,28 @@ def test_parse_rss_and_merge_sort_cap(monkeypatch):
     # source falls back to channel title when item <source> absent; uses <source> when present
     assert items[0]["source"] == "Test Feed"
     assert "T" in items[0]["published"]                    # ISO datetime
+    assert "_sort" not in items[0]                         # internal sort key stripped from output
+
+def test_parse_rss_source_present_and_fallback():
+    b = _backend()
+    items = b._parse_rss((FX / "clock_news.xml").read_text(), "Local")
+    by = {i["title"]: i for i in items}
+    assert by["Older headline"]["source"] == "Reuters"     # item <source> used when present
+    assert by["Newer headline"]["source"] == "Test Feed"   # falls back to channel <title>
+
+def test_news_feed_failure_isolated(monkeypatch):
+    b = _backend()
+    xml = (FX / "clock_news.xml").read_text()
+    def http(url):
+        if "bad" in url:
+            raise OSError("feed down")
+        return xml
+    monkeypatch.setattr(b, "_http_get", http)
+    errors = []
+    # derived local feed (google news) + http://good return xml; http://bad raises
+    items = b._news("50.1,19.0", "pl-PL", ["http://bad", "http://good"], 10, errors)
+    assert any("bad" in e["feed"] for e in errors)         # failed feed recorded, not raised
+    assert len(items) == 4                                  # local(2) + good(2) survived past the failing feed
 
 def test_local_feed_url_from_locale():
     b = _backend()
@@ -58,4 +80,4 @@ def test_fetch_partial_on_weather_failure(monkeypatch):
     out = b.fetch({"location": "50.1,19.0", "news_feeds": ["http://a"]},
                   now=datetime(2026, 6, 30, tzinfo=timezone.utc))
     assert out["weather"] is None and "errors" in out      # weather failed, isolated
-    assert len(out["news"]) >= 1                            # news still returned
+    assert len(out["news"]) == 4                            # local(2) + http://a(2); news unaffected by weather failure
