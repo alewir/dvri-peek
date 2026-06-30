@@ -128,7 +128,7 @@ def stop_go2rtc():
 #  Per-lens grabber (reads go2rtc's RTSP restream)
 # --------------------------------------------------------------------------- #
 class LensWorker(threading.Thread):
-    def __init__(self, lens_id, name, gw, jpeg_quality, target_fps, stream_mode):
+    def __init__(self, lens_id, name, gw, jpeg_quality, target_fps, tier):
         super().__init__(daemon=True)
         self.id = lens_id
         self.name = name
@@ -136,27 +136,22 @@ class LensWorker(threading.Thread):
         self._rtsp_port = gw.get("rtsp_port", 8554)
         self.jpeg_quality = jpeg_quality
         self.min_period = 1.0 / max(target_fps, 1)
-        self._mode = stream_mode
+        self.tier = tier                 # "sub" | "main" — fixed for this worker's life
         self._lock = threading.Lock()
         self._jpeg = None
         self._stop = threading.Event()
-        self._reconnect = threading.Event()
+        self.ready = False               # True once >=1 real frame decoded
         self.status = "connecting"
         self.resolution = "-"
         self.fps = 0.0
 
     def url(self):
-        name = self.id if self._mode == "sub" else f"{self.id}_main"
+        name = self.id if self.tier == "sub" else f"{self.id}_main"
         return f"rtsp://{self._rtsp_host}:{self._rtsp_port}/{name}"
-
-    def set_stream(self, mode):
-        if mode in SUBTYPE and mode != self._mode:
-            self._mode = mode
-            self._reconnect.set()
 
     @property
     def stream_mode(self):
-        return self._mode
+        return self.tier
 
     def stop(self):
         self._stop.set()
@@ -177,45 +172,46 @@ class LensWorker(threading.Thread):
     def run(self):
         enc = [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
         while not self._stop.is_set():
-            self._placeholder([self.name, "connecting..."])
-            self.status = "connecting"
+            if not self.ready:                       # only blank BEFORE the first frame
+                self._placeholder([self.name, "connecting..."])
+                self.status = "connecting"
             cap = cv2.VideoCapture(self.url(), cv2.CAP_FFMPEG)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             if not cap.isOpened():
-                self.status = "no signal / needs credentials"
-                self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
+                if not self.ready:                   # hold last frame if we ever had one
+                    self.status = "no signal / needs credentials"
+                    self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
                 cap.release()
                 if self._stop.wait(3.0):
                     break
                 continue
-            self._reconnect.clear()
             fail = 0
             t_prev = time.time()
             fps_ema = 0.0
-            while not self._stop.is_set() and not self._reconnect.is_set():
+            while not self._stop.is_set():
                 ok, frame = cap.read()
                 if not ok or frame is None:
                     fail += 1
                     if fail > 40:
-                        self.status = "no signal / needs credentials"
-                        self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
-                        break
+                        if not self.ready:
+                            self.status = "no signal / needs credentials"
+                            self._placeholder([self.name, "NO SIGNAL", "(needs camera credentials?)"])
+                        break                        # reconnect; ready -> last frame stays
                     time.sleep(0.05)
                     continue
                 fail = 0
-                now = time.time()
-                dt = now - t_prev
-                t_prev = now
+                now = time.time(); dt = now - t_prev; t_prev = now
                 if dt > 0:
                     fps_ema = 0.9 * fps_ema + 0.1 / dt if fps_ema else 1.0 / dt
                 self.fps = round(fps_ema, 1)
                 h, w = frame.shape[:2]
                 self.resolution = f"{w}x{h}"
-                self.status = f"online ({self._mode})"
+                self.status = f"online ({self.tier})"
                 ok2, buf = cv2.imencode(".jpg", frame, enc)
                 if ok2:
                     with self._lock:
                         self._jpeg = buf.tobytes()
+                    self.ready = True                # first real frame
                 time.sleep(self.min_period * 0.5)
             cap.release()
 
@@ -225,10 +221,33 @@ class LensWorker(threading.Thread):
 # --------------------------------------------------------------------------- #
 app = Flask(__name__)
 CFG = None
-WORKERS = {}        # lens_id -> LensWorker
-DEVICES = []        # config devices (for rendering)
+WORKERS = {}          # lens_id -> always-on SUB worker
+MAIN_WORKERS = {}     # lens_id -> on-demand MAIN worker (only while selected)
+LENS_META = {}        # lens_id -> {"name": str}
+_MAIN_LOCK = threading.Lock()   # guards MAIN_WORKERS start/stop (Flask runs threaded)
+DEVICES = []          # config devices (for rendering)
 REGISTRY = None
 STORE = None
+
+
+def _start_main_worker(lid):
+    # lock the check+insert so two concurrent /api/streams POSTs can't both pass the
+    # guard and leak a duplicate thread for the same lens. start() runs outside the lock.
+    with _MAIN_LOCK:
+        if lid in MAIN_WORKERS or lid not in LENS_META:
+            return
+        pl = CFG.get("player", {}); gw = CFG.get("gateway", {})
+        w = LensWorker(lid, LENS_META[lid]["name"], gw,
+                       pl.get("jpeg_quality", 75), pl.get("target_fps", 15), "main")
+        MAIN_WORKERS[lid] = w
+    w.start()
+
+
+def _stop_main_worker(lid):
+    with _MAIN_LOCK:
+        w = MAIN_WORKERS.pop(lid, None)
+    if w:
+        w.stop()
 
 
 def load_secrets(path):
@@ -379,9 +398,24 @@ def index():
                 '</div>')
     script = """
 <script>
+function pauseHiddenStreams(){
+  // Release MJPEG connections held by hidden device tabs (each <img> is a persistent
+  // HTTP/1.1 connection; the ~6/host budget is what caused the black screens).
+  document.querySelectorAll('.device').forEach(d=>{
+    const active=d.classList.contains('active');
+    d.querySelectorAll('img.cam').forEach(img=>{
+      if(active){
+        if(img.dataset.psrc){ img.src=img.dataset.psrc; delete img.dataset.psrc; }
+      } else if(img.getAttribute('src')){
+        img.dataset.psrc=img.getAttribute('src'); img.src='';
+      }
+    });
+  });
+}
 function showTab(dev){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.dev===dev));
   document.querySelectorAll('.device').forEach(d=>d.classList.toggle('active',d.id==='dev-'+dev));
+  pauseHiddenStreams();
 }
 // ---- server-side layout state ----
 let LAYOUT={ui:{header_collapsed:false},devices:{}};
@@ -407,6 +441,7 @@ async function loadState(){
     const dev=d.id.replace('dev-','');
     if(d.querySelector('.spot')) initDivider(dev);
   });
+  pauseHiddenStreams();
 }
 function saveUI(ui){if(!LAYOUT_LOADED) return; LAYOUT.ui=Object.assign({},LAYOUT.ui,ui);
   fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(LAYOUT)});}
@@ -440,7 +475,10 @@ function resolveSrc(id,def){return (id&&srcKnown(id))?id:def;}
 // streams (flicker) on every re-render.
 function setMedia(el,html){
   if(!el) return;
-  if(el.dataset.mkey!==html){ el.innerHTML=html; el.dataset.mkey=html; }
+  if(el.dataset.mkey!==html){
+    el.querySelectorAll('img').forEach(i=>{ i.src=''; });  // close old MJPEG conn before swap
+    el.innerHTML=html; el.dataset.mkey=html;
+  }
 }
 // Build the <select> options once per SOURCES set; only update the selection.
 // Rebuilding options on every render would drop a user's open dropdown.
@@ -603,6 +641,14 @@ async function poll(){
       m.innerHTML='<span class="dot '+(on?'on':(c.status==='connecting'?'wait':'off'))+'"></span>'+
                   (on?c.resolution+' '+c.fps+'f':'');
     });
+    // progressive big-pane upgrade: once a lens's main worker has frames, swap sub -> main
+    document.querySelectorAll('.device.active .bigmedia img.cam').forEach(img=>{
+      const c=statusMap[img.dataset.id];
+      if(c&&c.main_ready&&img.dataset.tier!=='main'){
+        img.dataset.tier='main';
+        img.src='/stream/'+encodeURIComponent(img.dataset.id)+'?tier=main';
+      }
+    });
   }catch(e){}
 }
 setInterval(poll,1500); poll();
@@ -615,11 +661,16 @@ loadState();
             + panes + script)
 
 
+def _pick_worker(lens_id):
+    tier = request.args.get("tier", "sub")
+    return (MAIN_WORKERS.get(lens_id) if tier == "main" else WORKERS.get(lens_id))
+
+
 @app.route("/stream/<lens_id>")
 def stream(lens_id):
-    w = WORKERS.get(lens_id)
+    w = _pick_worker(lens_id)
     if not w:
-        return "no such lens", 404
+        return "no such stream", 404
 
     def gen():
         period = 1.0 / max(CFG["player"].get("target_fps", 15), 1)
@@ -634,26 +685,36 @@ def stream(lens_id):
 
 @app.route("/snapshot/<lens_id>")
 def snapshot(lens_id):
-    w = WORKERS.get(lens_id)
+    w = _pick_worker(lens_id)
     if not w:
-        return "no such lens", 404
+        return "no such stream", 404
     jpg = w.get_jpeg()
     return Response(jpg, mimetype="image/jpeg") if jpg else ("no frame", 503)
 
 
 @app.route("/status")
 def status():
-    return jsonify([{"id": w.id, "name": w.name, "status": w.status,
-                     "resolution": w.resolution, "fps": w.fps, "stream": w.stream_mode}
-                    for w in WORKERS.values()])
+    out = []
+    for w in WORKERS.values():
+        m = MAIN_WORKERS.get(w.id)
+        out.append({"id": w.id, "name": w.name, "status": w.status,
+                    "resolution": w.resolution, "fps": w.fps, "tier": w.tier,
+                    "main_ready": bool(m and getattr(m, "ready", False)),
+                    "main_resolution": (m.resolution if m else None),
+                    "main_fps": (m.fps if m else None)})
+    return jsonify(out)
 
 
 @app.route("/api/streams", methods=["POST"])
 def api_streams():
     data = request.get_json(force=True, silent=True) or {}
     main_set = set(data.get("main", []))
-    for w in WORKERS.values():
-        w.set_stream("main" if w.id in main_set else "sub")
+    for lid in main_set:
+        if lid in WORKERS:
+            _start_main_worker(lid)
+    for lid in list(MAIN_WORKERS):
+        if lid not in main_set:
+            _stop_main_worker(lid)
     return jsonify({"ok": True})
 
 
@@ -684,11 +745,13 @@ def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gate
     else:
         lens_index = {ln["id"]: {"name": ln.get("name", ln["id"])}
                       for dev in DEVICES for ln in dev["lenses"]}
+    for lid, meta in lens_index.items():
+        LENS_META[lid] = {"name": meta["name"]}
     if start_workers:
         gw = CFG.get("gateway", {})
         for lid, meta in lens_index.items():
             w = LensWorker(lid, meta["name"], gw, pl.get("jpeg_quality", 75),
-                           pl.get("target_fps", 15), mode)
+                           pl.get("target_fps", 15), "sub")
             WORKERS[lid] = w
             w.start()
     return mode
@@ -708,6 +771,8 @@ def main():
         app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
     finally:
         for w in WORKERS.values():
+            w.stop()
+        for w in MAIN_WORKERS.values():
             w.stop()
         stop_go2rtc()
 

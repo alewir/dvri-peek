@@ -39,6 +39,7 @@ serves all of them.
 - 🖱️ **Draggable split** between the big view and the thumbnails, with a **persisted** ratio.
 - 📌 **Persisted lens selection** (server-side `state.local.json`); the active lens streams only in the big pane.
 - 🎚️ **Automatic HD**: the selected (big-pane) stream runs main/HD; previews stay on low-res sub — no manual toggle.
+- ⚡ **Progressive load**: the big pane shows the low-res stream instantly, then sharpens to HD when ready — no black gap; previews stay live and hidden tabs pause to keep connections bounded.
 - 🔁 Auto-reconnect; offline/unauthorized lenses show a clear status tile.
 - 🧱 Decoding via OpenCV's bundled H.264/H.265 — **no system ffmpeg required**.
 - 🔒 Credentials live in a **git-ignored** local config, never in the repo.

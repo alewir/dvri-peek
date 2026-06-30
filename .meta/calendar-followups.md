@@ -3,6 +3,14 @@
 Merge blockers FIXED in-branch: RRULE INTERVAL=0 DoS, end-less all-day vanishing.
 Cheap correctness folded in: DST month cells, max_events wiring, manifest/README align, week-scroll-reset, string-0 config clamp.
 
+## Stream-lifecycle — deferred (final review 2026-06-30, branch merge-ready, no blockers):
+- [ ] Remove the dead `--stream`/`default_stream` knob (workers are always created "sub"; CLI/print misleads). @DeprecatedRetention. player.py + cameras.example.yaml:25 + README.
+- [ ] Worker shows last frame + green dot during a transient reconnect (status not refreshed once ready). Consider a "reconnecting" (yellow) state holding the frame. player.py run().
+- [ ] `/api/streams` whole-reconcile not atomic (start-loop + stop-loop each locked, not together) — self-healing, single user can't trigger; optional: diff under one _MAIN_LOCK.
+- [ ] Defensive: call pauseHiddenStreams() after promote()/picker onchange applyAssignments() (safe today via mkey stability).
+- [ ] imencode-fail edge: status set "online" before encode; if encode fails ready stays False (pathological).
+- [ ] Test cosmetic: stray `s_ready=None` + unused ctor params in FakeW (tests/test_streams.py).
+
 ## Deferred (fast-follow, NOT merge-blocking):
 - [ ] DST fall-back off-by-one in the October month grid (renderMonth ms-stepping)
       FIX: Build cells with calendar-date overflow instead of ms arithmetic: `new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate()+idx)` at view.html:273, giving true local midnight across the CEST→CET transition. renderWeek does not exhibit the EU-transition defect; do not change line 308.
