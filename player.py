@@ -307,8 +307,10 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .dot{width:8px;height:8px;border-radius:50%;background:#888;display:inline-block;margin-right:5px}
  .on{background:#22c55e}.off{background:#ef4444}.wait{background:#eab308}
  /* grid */
- .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));flex:1 1 auto;min-height:0;overflow:auto;align-content:start}
- .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;aspect-ratio:16/9}
+ /* cells fill the grid area (rows share height) — a single NVR cell must fit the panel,
+    not force a 16:9 box taller than the viewport (which caused a vertical scrollbar) */
+ .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));grid-auto-rows:1fr;flex:1 1 auto;min-height:0;overflow:hidden}
+ .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
  /* collapsible header */
  header.collapsed{display:none}
  /* thin 6px visual accent (::before) inside a taller transparent ~24px touch target */
@@ -423,7 +425,8 @@ function pauseHiddenStreams(){
       if(active){
         if(img.dataset.psrc){ img.src=img.dataset.psrc; delete img.dataset.psrc; }
       } else if(img.getAttribute('src')){
-        img.dataset.psrc=img.getAttribute('src'); img.src='';
+        // 'data:,' (not '') reliably aborts the MJPEG socket in Chromium; '' can leave it half-open
+        img.dataset.psrc=img.getAttribute('src'); img.src='data:,';
       }
     });
   });
@@ -492,7 +495,7 @@ function resolveSrc(id,def){return (id&&srcKnown(id))?id:def;}
 function setMedia(el,html){
   if(!el) return;
   if(el.dataset.mkey!==html){
-    el.querySelectorAll('img').forEach(i=>{ i.src=''; });  // close old MJPEG conn before swap
+    el.querySelectorAll('img').forEach(i=>{ i.src='data:,'; });  // force-close old MJPEG socket before swap ('' can linger in Chromium)
     el.innerHTML=html; el.dataset.mkey=html;
   }
 }

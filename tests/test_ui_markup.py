@@ -213,5 +213,15 @@ def test_stream_lifecycle_client_logic():
     assert "pauseHiddenStreams()" in H                  # called (showTab/loadState)
     assert "?tier=main" in H                            # big-pane sub->main swap target
     assert "main_ready" in H                            # swap gated on main_ready
-    # teardown: setMedia clears old <img> src before replacing
-    assert "querySelectorAll('img')" in H and "i.src=''" in H
+    # teardown: setMedia force-closes the old MJPEG socket before replacing
+    # ('data:,' is reliable in Chromium; '' can leave the socket half-open → switch stall)
+    assert "querySelectorAll('img')" in H and "i.src='data:,'" in H
+    assert "img.src=''" not in H                         # no unreliable close left anywhere
+
+
+def test_grid_cell_fits_no_scroll():
+    # NVR grid: a single full-width cell must fit the panel, not force a 16:9 box taller
+    # than the viewport (which produced a vertical scrollbar)
+    H = open("player.py").read()
+    assert "grid-auto-rows:1fr" in H                     # cells share the grid height
+    assert "aspect-ratio:16/9" not in H                  # no fixed aspect that overflows
