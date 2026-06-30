@@ -50,7 +50,8 @@
 
  /* hide forecast + news outside main */
  body:not([data-ctx="main"]) .fc,
- body:not([data-ctx="main"]) .news{display:none}
+ body:not([data-ctx="main"]) .news,
+ body:not([data-ctx="main"]) .wx-hilo{display:none}   /* compact line = emoji+temp+location only */
 </style></head><body>
 <div id="wrap">
   <div id="t">--:--</div>
@@ -66,14 +67,15 @@ document.body.dataset.ctx=ctx;
 function esc(s){return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 
 function tick(){const n=new Date();
-  document.getElementById("t").textContent=n.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+  document.getElementById("t").textContent=n.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false});
   document.getElementById("d").textContent=n.toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"});}
 tick(); setInterval(tick,1000);
 
 function renderWx(w){
   const wx=document.getElementById("wx"),fc=document.getElementById("fc");
-  if(!w){wx.textContent="";fc.textContent="";return;}
-  wx.innerHTML=esc(w.emoji)+" "+w.temp+w.units+" "+esc(w.location_name)+
+  if(!w){wx.style.display="none";fc.textContent="";return;}
+  wx.style.display="";
+  wx.innerHTML=esc(w.emoji)+" "+w.temp+esc(w.units)+" "+esc(w.location_name)+
     ' <span class="wx-hilo">↑'+w.today.hi+"° ↓"+w.today.lo+"°</span>";
   fc.innerHTML=(w.forecast||[]).map(f=>
     '<span class="fc-item"><span class="fc-day">'+esc(f.day)+'</span>'+
