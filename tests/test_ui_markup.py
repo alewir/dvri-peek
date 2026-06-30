@@ -204,3 +204,14 @@ def test_active_header_js_preview_label_and_filler_status(tmp_path, monkeypatch)
     assert 'dataset.src=isActive?(effFiller' in compact
     # poll() no longer skips the active tile: its right zone must show the filler's live status
     assert "contains('active'))return" not in compact
+
+
+def test_stream_lifecycle_client_logic():
+    H = open("player.py").read()
+    assert "function pauseHiddenStreams" in H          # hidden-tab pause exists
+    assert "dataset.psrc" in H                          # paused src is stashed/restored
+    assert "pauseHiddenStreams()" in H                  # called (showTab/loadState)
+    assert "?tier=main" in H                            # big-pane sub->main swap target
+    assert "main_ready" in H                            # swap gated on main_ready
+    # teardown: setMedia clears old <img> src before replacing
+    assert "querySelectorAll('img')" in H and "i.src=''" in H

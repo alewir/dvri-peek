@@ -398,9 +398,24 @@ def index():
                 '</div>')
     script = """
 <script>
+function pauseHiddenStreams(){
+  // Release MJPEG connections held by hidden device tabs (each <img> is a persistent
+  // HTTP/1.1 connection; the ~6/host budget is what caused the black screens).
+  document.querySelectorAll('.device').forEach(d=>{
+    const active=d.classList.contains('active');
+    d.querySelectorAll('img.cam').forEach(img=>{
+      if(active){
+        if(img.dataset.psrc){ img.src=img.dataset.psrc; delete img.dataset.psrc; }
+      } else if(img.getAttribute('src')){
+        img.dataset.psrc=img.getAttribute('src'); img.src='';
+      }
+    });
+  });
+}
 function showTab(dev){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.dev===dev));
   document.querySelectorAll('.device').forEach(d=>d.classList.toggle('active',d.id==='dev-'+dev));
+  pauseHiddenStreams();
 }
 // ---- server-side layout state ----
 let LAYOUT={ui:{header_collapsed:false},devices:{}};
@@ -426,6 +441,7 @@ async function loadState(){
     const dev=d.id.replace('dev-','');
     if(d.querySelector('.spot')) initDivider(dev);
   });
+  pauseHiddenStreams();
 }
 function saveUI(ui){if(!LAYOUT_LOADED) return; LAYOUT.ui=Object.assign({},LAYOUT.ui,ui);
   fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(LAYOUT)});}
@@ -459,7 +475,10 @@ function resolveSrc(id,def){return (id&&srcKnown(id))?id:def;}
 // streams (flicker) on every re-render.
 function setMedia(el,html){
   if(!el) return;
-  if(el.dataset.mkey!==html){ el.innerHTML=html; el.dataset.mkey=html; }
+  if(el.dataset.mkey!==html){
+    el.querySelectorAll('img').forEach(i=>{ i.src=''; });  // close old MJPEG conn before swap
+    el.innerHTML=html; el.dataset.mkey=html;
+  }
 }
 // Build the <select> options once per SOURCES set; only update the selection.
 // Rebuilding options on every render would drop a user's open dropdown.
@@ -621,6 +640,14 @@ async function poll(){
       const on=c.status.startsWith('online');
       m.innerHTML='<span class="dot '+(on?'on':(c.status==='connecting'?'wait':'off'))+'"></span>'+
                   (on?c.resolution+' '+c.fps+'f':'');
+    });
+    // progressive big-pane upgrade: once a lens's main worker has frames, swap sub -> main
+    document.querySelectorAll('.device.active .bigmedia img.cam').forEach(img=>{
+      const c=statusMap[img.dataset.id];
+      if(c&&c.main_ready&&img.dataset.tier!=='main'){
+        img.dataset.tier='main';
+        img.src='/stream/'+encodeURIComponent(img.dataset.id)+'?tier=main';
+      }
     });
   }catch(e){}
 }
