@@ -111,10 +111,15 @@ the camera's DVRIP.
 | `/stream/<lens>` | MJPEG (multipart/x-mixed-replace) |
 | `/snapshot/<lens>` | single JPEG |
 | `/status` | JSON: per-lens status, resolution, fps |
-| `/set_stream?mode=sub\|main` | switch stream tier |
+| `/api/sources` | JSON: assignable sources (lenses + plugins) |
+| `/api/layout` (GET/POST) | server-side dashboard layout (`state.local.json`) |
+| `/api/streams` (POST) | set which lenses run main/HD (UI auto-tiers: big-pane lens) |
+| `/plugin/<id>/view?ctx=` · `/plugin/<id>/data` | plugin iframe + cached JSON |
 
 UI: spotlight = big pane + lens thumbnails; click promotes a lens (active lens
-shown only in the big pane), draggable split + selection persisted (localStorage).
+shown only in the big pane; its stream auto-upgrades to main/HD while previews
+stay on sub). Draggable split, lens selection, and tile/filler assignments persist
+server-side in `state.local.json`.
 
 ## 8. Deployment (summary)
 Player runs as a systemd service; a labwc autostart opens Chromium fullscreen.

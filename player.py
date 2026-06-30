@@ -21,6 +21,7 @@ import os
 import sys
 import time
 import json
+import html
 import signal
 import argparse
 import threading
@@ -253,49 +254,63 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  .tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
  .right{margin-left:auto;display:flex;gap:6px;align-items:center}
  .sbtn{background:#222;border:1px solid var(--line);color:#cfcfd4;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px}
- .sbtn.active{background:#374151;border-color:#4b5563;color:#fff}
  .device{display:none;padding:10px;flex:1 1 auto;min-height:0}
  .device.active{display:flex;flex-direction:column;min-height:0}
  /* spotlight */
  .spot{display:flex;gap:0;align-items:stretch;flex:1 1 auto;min-height:0}
  .big{flex:0 0 66%;min-width:160px;display:flex;flex-direction:column;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden}
  .big .cap{flex:0 0 auto;padding:6px 12px;font-size:13px;font-weight:600;background:#141417}
- .divider{flex:0 0 16px;margin:0 5px;cursor:col-resize;border-radius:7px;background:#3a3a42;
+ .divider{flex:0 0 16px;margin:0 5px;cursor:col-resize;border-radius:7px;background:#3a3a42;touch-action:none;
           display:flex;align-items:center;justify-content:center;user-select:none;color:#cbd5e1;font-size:18px;line-height:1}
  .divider:hover,.divider.drag{background:var(--accent);color:#fff}
  .thumbs{flex:1 1 0;min-width:150px;display:flex;flex-direction:column;gap:8px}
- .thumb{flex:1 1 0;min-height:0;position:relative;background:#000;border:2px solid var(--line);border-radius:9px;
-        overflow:hidden;cursor:pointer}
- .thumb.active{border-color:var(--accent);cursor:default}
- .thumb .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;
-             background:linear-gradient(#000b,#0000);display:flex;justify-content:space-between;z-index:2}
- .thumb .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-             color:#9ca3af;font-size:13px;text-align:center;padding:10px}
+ .tile{flex:1 1 0;min-height:0;position:relative;background:#000;border:2px solid var(--line);border-radius:9px;
+       overflow:hidden;cursor:pointer;display:flex;flex-direction:column}
+ .tile.active{outline:2px solid var(--accent);outline-offset:-2px;cursor:default}
+ .tname{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .tmeta{flex:0 0 auto;white-space:nowrap;font-size:10px;color:#9ca3af;font-variant-numeric:tabular-nums}
+ /* active tile = 3-zone strip: name (left) · [preview: filler] (center, muted) · status (right) */
+ .tpreview{flex:0 99 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+   font-size:10px;font-weight:500;color:#8b8b93}
+ .tpreview:empty{display:none}
+ .tile.active .tname{flex:0 1 auto}
+ .tile.active .tmeta{margin-left:auto}
+ .tile .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+            color:#9ca3af;font-size:13px;text-align:center;padding:10px}
+ /* header strip — always-visible row above media; tile = flex col → [strip][media] */
+ .tilehead{display:flex;align-items:center;gap:6px;padding:3px 8px;font-size:11px;font-weight:600;
+   color:var(--txt);background:#141417;border-bottom:1px solid #1c1c21;flex:0 0 auto;min-height:22px}
+ .tile.active .tilehead{border-left:3px solid var(--accent);padding-left:5px}
  .dot{width:8px;height:8px;border-radius:50%;background:#888;display:inline-block;margin-right:5px}
  .on{background:#22c55e}.off{background:#ef4444}.wait{background:#eab308}
  /* grid */
  .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));flex:1 1 auto;min-height:0;overflow:auto;align-content:start}
- .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;position:relative;aspect-ratio:16/9}
- .cell .lbl{position:absolute;top:0;left:0;right:0;padding:4px 8px;font-size:12px;font-weight:600;background:linear-gradient(#000b,#0000)}
+ .cell{background:#000;border:1px solid var(--line);border-radius:9px;overflow:hidden;display:flex;flex-direction:column;aspect-ratio:16/9}
  /* collapsible header */
  header.collapsed{display:none}
- #revealbar{position:fixed;top:0;left:0;right:0;height:6px;background:#2563eb55;cursor:pointer;z-index:20;display:none}
+ /* thin 6px visual accent (::before) inside a taller transparent ~24px touch target */
+ #revealbar{position:fixed;top:0;left:0;right:0;height:24px;background:transparent;cursor:pointer;z-index:20;display:none}
+ #revealbar::before{content:"";position:absolute;top:0;left:0;right:0;height:6px;background:#2563eb55}
  body.headerhidden #revealbar{display:block}
  /* settings mode */
- .thumb .picker,.cell .picker{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none}
- body.settings .thumb .picker,body.settings .cell .picker{display:block}
- /* title overlay: bottom caption on the active tile's filler; never covers the
-    top status row (.lbl), so the live status dot/resolution stays visible */
- .titleoverlay{position:absolute;bottom:0;left:0;right:0;padding:4px 8px;font-size:12px;
-   font-weight:600;background:linear-gradient(#0000,#000b);z-index:3;pointer-events:none}
- .thumb.active .lbl .tname{display:none}
+ .picker-wrap{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none;
+              background:rgba(14,14,16,.88);border-radius:5px;padding:3px 6px}
+ body.settings .tile .picker-wrap,body.settings .cell .picker-wrap{display:flex;align-items:center;gap:5px}
+ .picker-lbl{font-size:10px;font-weight:700;color:#9ca3af;white-space:nowrap;flex:0 0 auto;text-transform:uppercase;letter-spacing:.04em}
+ .picker{flex:1 1 auto;min-width:0;background:#1e1e24;color:var(--txt);border:1px solid var(--line);
+         border-radius:4px;font-size:11px;padding:2px 4px;cursor:pointer}
  .pluginframe{width:100%;height:100%;border:0;background:#000;display:block}
+ /* iframes (plugins) swallow mouse events; a parent-doc overlay restores click-to-promote
+    on tiles (clicks bubble to the tile's onclick). The divider uses pointer capture, so
+    pointermove is routed to it even over the big-pane iframe — no drag shield needed. */
+ .tile .clickcatch{position:absolute;inset:0;z-index:1;cursor:pointer}
+ .tile.active .clickcatch{cursor:default}
  /* big pane media container */
  .bigmedia{flex:1 1 auto;min-height:0;overflow:hidden;background:#000}
  .bigmedia img{width:100%;height:100%;object-fit:contain;display:block}
  .bigmedia iframe{width:100%;height:100%;border:0;display:block}
- /* tile media container */
- .tmediadiv{position:absolute;inset:0;overflow:hidden}
+ /* tile / cell media container — fills remaining height under the header strip */
+ .tmediadiv{flex:1 1 auto;min-height:0;position:relative;overflow:hidden}
  .tmediadiv img{width:100%;height:100%;object-fit:contain;background:#000;display:block}
  .tmediadiv iframe{width:100%;height:100%;background:#000;border:0;display:block}
 </style></head><body>
@@ -318,16 +333,16 @@ def render_spotlight(dev):
     for ln in lenses:
         lid, lname = ln["id"], ln.get("name", ln["id"])
         thumbs += f"""
-        <div class="thumb" id="th-{lid}" data-lens="{lid}" data-slot="{lid}" data-source="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
-          <div class="lbl"><span class="tname">{lname}</span><span id="meta-{lid}"><span class="dot wait"></span></span></div>
-          <div class="titleoverlay"></div>
+        <div class="tile" id="th-{lid}" data-lens="{lid}" data-slot="{lid}" data-source="{lid}" data-dev="{dev['id']}" onclick="promote('{dev['id']}','{lid}')">
+          <div class="tilehead" id="tilehead-{lid}"><span class="tname">{html.escape(lname)}</span><span class="tpreview"></span><span class="tmeta"></span></div>
           <div class="tmediadiv" id="tmedia-{lid}">{_tile_media(lid, "tile")}</div>
-          <select class="picker" data-slot="{lid}" data-dev="{dev['id']}"></select>
+          <div class="clickcatch"></div>
+          <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
         </div>"""
     return f"""
     <div class="spot" id="spot-{dev['id']}">
       <div class="big">
-        <div class="cap" id="bigcap-{dev['id']}">{lenses[0].get('name','')}</div>
+        <div class="cap" id="bigcap-{dev['id']}">{html.escape(lenses[0].get('name',''))}</div>
         <div class="bigmedia" id="bigmedia-{dev['id']}">{_tile_media(first, "main")}</div>
       </div>
       <div class="divider" data-dev="{dev['id']}" title="Drag to resize">⋮</div>
@@ -341,9 +356,9 @@ def render_grid(dev):
         lid, lname = ln["id"], ln.get("name", ln["id"])
         cells += f"""
         <div class="cell" data-source="{lid}" data-slot="{lid}" data-dev="{dev['id']}">
-          <div class="lbl"><span>{lname}</span> <span id="meta-{lid}"><span class="dot wait"></span></span></div>
+          <div class="tilehead"><span class="tname">{html.escape(lname)}</span><span class="tmeta"></span></div>
           <div class="tmediadiv">{_tile_media(lid, "tile")}</div>
-          <select class="picker" data-slot="{lid}" data-dev="{dev['id']}"></select>
+          <div class="picker-wrap"><span class="picker-lbl">Show:</span><select class="picker" data-slot="{lid}" data-dev="{dev['id']}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()"></select></div>
         </div>"""
     return f'<div class="grid">{cells}</div>'
 
@@ -354,17 +369,14 @@ def index():
     panes = ""
     for i, dev in enumerate(DEVICES):
         active = " active" if i == 0 else ""
-        tabs += f'<button class="tab{active}" data-dev="{dev["id"]}" onclick="showTab(\'{dev["id"]}\')">{dev["name"]}</button>'
+        tabs += f'<button class="tab{active}" data-dev="{dev["id"]}" onclick="showTab(\'{dev["id"]}\')">{html.escape(dev["name"])}</button>'
         body = render_spotlight(dev) if dev.get("layout") == "spotlight" else render_grid(dev)
         panes += f'<div class="device{active}" id="dev-{dev["id"]}">{body}</div>'
-    mode = next(iter(WORKERS.values())).stream_mode if WORKERS else "sub"
     head = PAGE_HEAD
-    controls = (f'<div class="right">'
-                f'<button class="sbtn{" active" if mode=="main" else ""}" id="b-main" onclick="setStream(\'main\')">Main HD</button>'
-                f'<button class="sbtn{" active" if mode=="sub" else ""}" id="b-sub" onclick="setStream(\'sub\')">Sub</button>'
-                f'<button class="sbtn" id="gear" onclick="toggleSettings()">&#9881;</button>'
-                f'<button class="sbtn" id="header-collapse" onclick="collapseHeader()">&#9662;</button>'
-                f'</div>')
+    controls = ('<div class="right">'
+                '<button class="sbtn" id="gear" onclick="toggleSettings()">&#9881;</button>'
+                '<button class="sbtn" id="header-collapse" onclick="collapseHeader()">&#9662;</button>'
+                '</div>')
     script = """
 <script>
 function showTab(dev){
@@ -374,13 +386,21 @@ function showTab(dev){
 // ---- server-side layout state ----
 let LAYOUT={ui:{header_collapsed:false},devices:{}};
 let SOURCES=[];
+// Persisting is gated on a successful /api/layout load: an unloaded module default
+// must never overwrite good disk state. Stays false until /api/layout resolves.
+let LAYOUT_LOADED=false;
+// HTML-encode any local-config value interpolated into innerHTML strings (mirrors
+// plugins/calendar/view.html's esc): a stray quote in a name can't break markup.
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 async function loadState(){
-  try{
-    [SOURCES,LAYOUT]=await Promise.all([
-      fetch('/api/sources').then(r=>r.json()),
-      fetch('/api/layout').then(r=>r.json())
-    ]);
-  }catch(e){ console.error('loadState failed:',e); SOURCES=SOURCES||[]; }
+  // Fetch sources and layout INDEPENDENTLY: a failed /api/sources must not wipe
+  // LAYOUT (and vice-versa). Each settles into its own global only on success.
+  await Promise.allSettled([
+    fetch('/api/sources').then(r=>r.json()).then(d=>{SOURCES=d;})
+      .catch(e=>console.error('sources load failed:',e)),
+    fetch('/api/layout').then(r=>r.json()).then(d=>{LAYOUT=d;LAYOUT_LOADED=true;})
+      .catch(e=>console.error('layout load failed:',e))
+  ]);
   applyHeader(!!(LAYOUT.ui&&LAYOUT.ui.header_collapsed));
   applyAssignments();
   document.querySelectorAll('.device').forEach(d=>{
@@ -388,9 +408,10 @@ async function loadState(){
     if(d.querySelector('.spot')) initDivider(dev);
   });
 }
-function saveUI(ui){LAYOUT.ui=Object.assign({},LAYOUT.ui,ui);
+function saveUI(ui){if(!LAYOUT_LOADED) return; LAYOUT.ui=Object.assign({},LAYOUT.ui,ui);
   fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(LAYOUT)});}
-function saveLayout(){fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(LAYOUT)});}
+function saveLayout(){if(!LAYOUT_LOADED) return;
+  fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(LAYOUT)});}
 function toggleSettings(){document.body.classList.toggle('settings');
   if(!document.body.classList.contains('settings')) saveLayout();}
 // ---- collapsible header ----
@@ -403,10 +424,16 @@ function _mediaHTML(srcId,ctx){
   if(!srcId) return '';
   if(srcId.startsWith('plugin:')){
     const pid=srcId.split(':')[1];
-    return '<iframe class="pluginframe" src="/plugin/'+pid+'/view?ctx='+ctx+'" frameborder="0" sandbox="allow-scripts allow-same-origin"></iframe>';
+    return '<iframe class="pluginframe" src="/plugin/'+esc(pid)+'/view?ctx='+ctx+'" frameborder="0" sandbox="allow-scripts allow-same-origin"></iframe>';
   }
-  return '<img class="cam" data-id="'+srcId+'" src="/stream/'+srcId+'">';
+  return '<img class="cam" data-id="'+esc(srcId)+'" src="/stream/'+esc(srcId)+'">';
 }
+// A source is "known" when it exists in SOURCES. When /api/sources failed to load
+// (SOURCES empty) staleness is unknowable, so nothing is treated as removed.
+function srcKnown(id){return !SOURCES.length||SOURCES.some(s=>s.id===id);}
+// Resolve an assigned/override id against SOURCES: ids removed from config (stale
+// on-disk state) fall back to the slot default so a tile never points at nothing.
+function resolveSrc(id,def){return (id&&srcKnown(id))?id:def;}
 // Only rewrite a media container when its desired content actually changed.
 // Comparing against a stored intended-key (not el.innerHTML, which the browser
 // re-serializes) avoids needlessly tearing down + restarting live MJPEG <img>
@@ -417,86 +444,111 @@ function setMedia(el,html){
 }
 // Build the <select> options once per SOURCES set; only update the selection.
 // Rebuilding options on every render would drop a user's open dropdown.
-function fillPicker(picker,selVal){
+function fillPicker(picker,selVal,withNone){
   if(!picker||!SOURCES.length) return;
-  const sig=SOURCES.map(s=>s.id).join(',');
+  // Fold withNone into the cached signature so the option list rebuilds when a tile
+  // toggles between Show: and Filler: modes (else the (none) option goes missing/stale).
+  const sig=(withNone?'none|':'')+SOURCES.map(s=>s.id).join(',');
   if(picker.dataset.sig!==sig){
-    picker.innerHTML=SOURCES.map(s=>'<option value="'+s.id+'">'+s.name+'</option>').join('');
+    const opts=SOURCES.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+'</option>');
+    if(withNone) opts.unshift('<option value="">(none — live in main)</option>');
+    picker.innerHTML=opts.join('');
     picker.dataset.sig=sig;
   }
   if(picker.value!==(selVal||'')) picker.value=selVal||'';
 }
 // ---- tile assignments ----
 function applyAssignments(){
+  const mainLenses=[];
   document.querySelectorAll('.device').forEach(d=>{
     const dev=d.id.replace('dev-','');
     const devState=(LAYOUT.devices&&LAYOUT.devices[dev])||{};
     const tiles=devState.tiles||{};
-    const filler=devState.filler||null;
-    const thumbEls=[...d.querySelectorAll('.thumb[data-dev="'+dev+'"]')];
-    // determine selected source (falls back to first thumb's default)
+    // stale on-disk filler (source removed from config) → no filler
+    const filler=resolveSrc(devState.filler||null,null);
+    const thumbEls=[...d.querySelectorAll('.tile[data-dev="'+dev+'"]')];
+    // determine selected tile; a stale/removed selection falls back to the first thumb
     let selected=devState.selected||null;
+    if(selected&&!srcKnown(selected)) selected=null;
     if(!selected&&thumbEls.length>0) selected=thumbEls[0].dataset.source;
     // spotlight: big pane + thumbnails
     if(thumbEls.length>0){
       const selThumb=thumbEls.find(t=>t.dataset.source===selected)||thumbEls[0];
-      if(selThumb){
-        const selSrc=tiles[selThumb.dataset.slot]||selThumb.dataset.source;
-        setMedia(d.querySelector('#bigmedia-'+dev),_mediaHTML(selSrc,'main'));
-        const bigcap=d.querySelector('#bigcap-'+dev);
-        if(bigcap){
-          const meta=SOURCES.find(s=>s.id===selSrc);
-          const name=meta?meta.name:((selThumb.querySelector('.tname')||{}).textContent||'');
-          if(bigcap.textContent!==name) bigcap.textContent=name;
-        }
+      // pin selection to a real tile so EXACTLY ONE tile is ever active
+      selected=selThumb.dataset.source;
+      const selSrc=resolveSrc(tiles[selThumb.dataset.slot],selThumb.dataset.source);
+      // tier by prefix (not SOURCES lookup): a failed /api/sources can't drop the big lens to sub
+      if(selSrc&&!selSrc.startsWith('plugin:')) mainLenses.push(selSrc);
+      setMedia(d.querySelector('#bigmedia-'+dev),_mediaHTML(selSrc,'main'));
+      const bigcap=d.querySelector('#bigcap-'+dev);
+      if(bigcap){
+        // resolve un-suffixed name from SOURCES (never the active thumb's .tname,
+        // which now carries the " · in main" decoration)
+        const meta=SOURCES.find(s=>s.id===selSrc);
+        const name=meta?meta.name:selSrc;
+        if(bigcap.textContent!==name) bigcap.textContent=name;
       }
       thumbEls.forEach(th=>{
         const slot=th.dataset.slot;
         const defaultSrc=th.dataset.source;
-        const assignedSrc=tiles[slot]||defaultSrc;
+        const assignedSrc=resolveSrc(tiles[slot],defaultSrc);
         const isActive=th.dataset.source===selected;
+        // a filler equal to the big-pane source = no filler (don't duplicate main)
+        const effFiller=(isActive&&filler&&filler!==selSrc)?filler:null;
         th.classList.toggle('active',isActive);
-        // tile media: active shows filler (or placeholder); others show assigned source
+        const _sm=SOURCES.find(s=>s.id===assignedSrc);
+        const _tn=th.querySelector('.tname');
+        // LEFT: big-pane source name (+ "· in main" on the active tile)
+        if(_tn){const nm=(_sm?_sm.name:assignedSrc)+(isActive?' · in main':''); if(_tn.textContent!==nm)_tn.textContent=nm;}
+        // CENTER: "[preview: <filler>]" — muted; empty (→display:none) for non-active or no filler
+        const _tp=th.querySelector('.tpreview');
+        if(_tp){let pv=''; if(effFiller){const _fm=SOURCES.find(s=>s.id===effFiller); pv='[preview: '+(_fm?_fm.name:effFiller)+']';}
+          if(_tp.textContent!==pv) _tp.textContent=pv;}
+        // RIGHT (status source): active tile reflects the FILLER it actually shows; others their slot source
+        th.dataset.src=isActive?(effFiller||''):assignedSrc;
+        // tile media: active shows filler (or a content-aware placeholder); others show assigned source
         let html;
-        if(isActive&&filler) html=_mediaHTML(filler,'filler');
-        else if(isActive) html='<div class="placeholder">&#9679; Live in main view</div>';
+        if(isActive&&effFiller) html=_mediaHTML(effFiller,'filler');
+        else if(isActive){const plg=selSrc&&selSrc.startsWith('plugin:');
+          html='<div class="placeholder">&#9679; '+(plg?'in main':'Live in main view')+'</div>';}
         else html=_mediaHTML(assignedSrc,'tile');
         setMedia(th.querySelector('.tmediadiv'),html);
-        // title overlay: shown on active tile to label the slot's original title
-        const overlay=th.querySelector('.titleoverlay');
-        if(overlay){
-          const ot=isActive?((th.querySelector('.tname')||{}).textContent||''):'';
-          if(overlay.textContent!==ot) overlay.textContent=ot;
-        }
         // picker: active tile picker selects filler; others select slot source
+        const pickerLbl=th.querySelector('.picker-lbl');
+        if(pickerLbl) pickerLbl.textContent=isActive?'Filler:':'Show:';
         const picker=th.querySelector('.picker');
         if(picker){
-          fillPicker(picker,isActive?(filler||''):assignedSrc);
+          fillPicker(picker,isActive?(filler||''):assignedSrc,isActive);
           picker.onchange=isActive
             ?()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
-                   LAYOUT.devices[dev].filler=picker.value; applyAssignments(); }
+                   LAYOUT.devices[dev].filler=picker.value||null; applyAssignments(); saveLayout(); }
             :()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
                    LAYOUT.devices[dev].tiles=LAYOUT.devices[dev].tiles||{};
-                   LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); };
+                   LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); saveLayout(); };
         }
       });
     }
     // grid: update cell media + pickers (no selected/big-pane logic)
     d.querySelectorAll('.cell[data-dev="'+dev+'"]').forEach(cell=>{
       const slot=cell.dataset.slot;
-      const assignedSrc=tiles[slot]||cell.dataset.source;
+      const assignedSrc=resolveSrc(tiles[slot],cell.dataset.source);
+      const _csm=SOURCES.find(s=>s.id===assignedSrc), _ctn=cell.querySelector('.tname');
+      if(_ctn){const nm=_csm?_csm.name:assignedSrc; if(_ctn.textContent!==nm)_ctn.textContent=nm;}
+      cell.dataset.src=assignedSrc;
       setMedia(cell.querySelector('.tmediadiv'),_mediaHTML(assignedSrc,'tile'));
       const picker=cell.querySelector('.picker');
       if(picker){
         fillPicker(picker,assignedSrc);
         picker.onchange=()=>{ LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
           LAYOUT.devices[dev].tiles=LAYOUT.devices[dev].tiles||{};
-          LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); };
+          LAYOUT.devices[dev].tiles[slot]=picker.value; applyAssignments(); saveLayout(); };
       }
     });
   });
+  syncStreams(mainLenses);
 }
 function promote(dev,lid){
+  if(document.body.classList.contains('settings')) return;
   if(LAYOUT.devices&&LAYOUT.devices[dev]&&LAYOUT.devices[dev].selected===lid) return;
   if(!LAYOUT.devices) LAYOUT.devices={};
   if(!LAYOUT.devices[dev]) LAYOUT.devices[dev]={};
@@ -507,33 +559,50 @@ function promote(dev,lid){
 function initDivider(dev){
   const sp=document.getElementById('spot-'+dev); if(!sp) return;
   const big=sp.querySelector('.big'); const div=sp.querySelector('.divider');
-  const saved=localStorage.getItem('split-'+dev); if(saved) big.style.flexBasis=saved;
+  // restore the split from server-side layout state (per device), not browser storage
+  const saved=LAYOUT.devices&&LAYOUT.devices[dev]&&LAYOUT.devices[dev].split;
+  if(saved) big.style.flexBasis=saved;
   let dragging=false;
-  div.addEventListener('mousedown',e=>{dragging=true;div.classList.add('drag');document.body.style.userSelect='none';e.preventDefault();});
-  window.addEventListener('mousemove',e=>{
+  // Pointer events (mouse AND touch). setPointerCapture routes every subsequent
+  // pointermove/up to the divider — even while the cursor is over the big-pane
+  // iframe — so the iframe can no longer eat the drag (no drag-shield overlay needed).
+  div.addEventListener('pointerdown',e=>{dragging=true;div.classList.add('drag');
+    div.setPointerCapture(e.pointerId);document.body.style.userSelect='none';e.preventDefault();});
+  div.addEventListener('pointermove',e=>{
     if(!dragging)return; const r=sp.getBoundingClientRect();
-    let pct=(e.clientX-r.left)/r.width*100; pct=Math.max(25,Math.min(85,pct));
+    // width-aware ceiling: keep the thumbnail column (150px min) + divider box (26px:
+    // 16 flex-basis + 2×5 margin) on-screen so its status dots/res/fps are never clipped
+    const maxPct=(r.width-150-26)/r.width*100;
+    let pct=(e.clientX-r.left)/r.width*100; pct=Math.max(25,Math.min(Math.min(85,maxPct),pct));
     big.style.flexBasis=pct.toFixed(1)+'%';
   });
-  window.addEventListener('mouseup',()=>{
+  div.addEventListener('pointerup',e=>{
     if(!dragging)return; dragging=false; div.classList.remove('drag'); document.body.style.userSelect='';
-    try{ localStorage.setItem('split-'+dev, big.style.flexBasis); }catch(e){}
+    try{ div.releasePointerCapture(e.pointerId); }catch(_){}
+    LAYOUT.devices[dev]=LAYOUT.devices[dev]||{};
+    LAYOUT.devices[dev].split=big.style.flexBasis; saveLayout();
   });
 }
-function setStream(m){
-  fetch('/set_stream?mode='+m).then(()=>{
-    document.getElementById('b-sub').classList.toggle('active',m==='sub');
-    document.getElementById('b-main').classList.toggle('active',m==='main');
-    document.querySelectorAll('img.cam').forEach(i=>{ if(i.src && !i.src.endsWith('/')) i.src=i.src.split('?')[0]+'?t='+Date.now(); });
-  });
+function syncStreams(main){
+  fetch('/api/streams',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({main})});
 }
 async function poll(){
-  try{const s=await (await fetch('/status')).json();
-    for(const c of s){ const m=document.getElementById('meta-'+c.id); if(!m)continue;
+  try{
+    const s=await (await fetch('/status')).json();
+    const statusMap={};
+    for(const c of s) statusMap[c.id]=c;
+    document.querySelectorAll('.tile,.cell').forEach(el=>{
+      // active tile included: its .tmeta (right zone) shows the FILLER's status via dataset.src
+      const src=el.dataset.src;
+      const m=el.querySelector('.tmeta');
+      if(!m) return;
+      if(!src||src.startsWith('plugin:')){m.innerHTML='';return;}
+      const c=statusMap[src];
+      if(!c){m.innerHTML='<span class="dot off"></span>';return;}
       const on=c.status.startsWith('online');
       m.innerHTML='<span class="dot '+(on?'on':(c.status==='connecting'?'wait':'off'))+'"></span>'+
-                  (on? c.resolution+' '+c.fps+'f':'');
-    }
+                  (on?c.resolution+' '+c.fps+'f':'');
+    });
   }catch(e){}
 }
 setInterval(poll,1500); poll();
@@ -579,12 +648,13 @@ def status():
                     for w in WORKERS.values()])
 
 
-@app.route("/set_stream")
-def set_stream():
-    mode = request.args.get("mode", "sub")
+@app.route("/api/streams", methods=["POST"])
+def api_streams():
+    data = request.get_json(force=True, silent=True) or {}
+    main_set = set(data.get("main", []))
     for w in WORKERS.values():
-        w.set_stream(mode)
-    return jsonify({"ok": True, "mode": mode})
+        w.set_stream("main" if w.id in main_set else "sub")
+    return jsonify({"ok": True})
 
 
 def bootstrap(config_path=None, stream_mode=None, start_workers=True, start_gateway=True,

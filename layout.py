@@ -42,6 +42,8 @@ class LayoutStore:
         merged = _deep_copy(DEFAULT_STATE)
         merged["ui"]["header_collapsed"] = bool(
             (state.get("ui") or {}).get("header_collapsed", False))
+        # device sub-keys (selected / filler / tiles / split) pass through verbatim —
+        # only top-level keys are normalized, so client-owned per-device state survives.
         merged["devices"] = state.get("devices") or {}
         with self._lock:
             tmp = self.path + ".tmp"

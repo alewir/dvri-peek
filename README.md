@@ -37,8 +37,8 @@ serves all of them.
 - 🔌 **DVRIP → RTSP** bridge via [go2rtc](https://github.com/AlexxIT/go2rtc) (handles the proprietary handshake).
 - 🧩 **One tab per device**; **spotlight** layout (big pane + thumbnails) or **grid**.
 - 🖱️ **Draggable split** between the big view and the thumbnails, with a **persisted** ratio.
-- 📌 **Persisted lens selection** (localStorage); the active lens streams only in the big pane.
-- 🎚️ **Main HD / Sub** stream toggle.
+- 📌 **Persisted lens selection** (server-side `state.local.json`); the active lens streams only in the big pane.
+- 🎚️ **Automatic HD**: the selected (big-pane) stream runs main/HD; previews stay on low-res sub — no manual toggle.
 - 🔁 Auto-reconnect; offline/unauthorized lenses show a clear status tile.
 - 🧱 Decoding via OpenCV's bundled H.264/H.265 — **no system ffmpeg required**.
 - 🔒 Credentials live in a **git-ignored** local config, never in the repo.
@@ -157,12 +157,23 @@ goes in the **git-ignored** `secrets.local.yaml`:
 # secrets.local.yaml  (git-ignored — never commit this file)
 plugins:
   calendar:
+    lookback_days: 90        # how far back the fetched window starts
+    lookahead_days: 365      # how far ahead it reaches (big-view browsing is bounded to this window)
+    max_events_grid: 2000    # safety cap on total expanded events in the dataset
+    max_events: 5            # small-view agenda slice (next N upcoming); default 5 keeps it no-scroll in the tile
     sources:
       - name: "Personal"
+        color: "#4285f4"     # source color for chips/bars/dots
         ics_url: "https://example.com/your-calendar.ics"   # <-- replace with real URL
       # - name: "Work"
+      #   color: "#0b8043"
       #   ics_url: "https://example.com/work.ics"
 ```
+
+The calendar's **big view** (when assigned to the main/spotlight pane) is a browsable
+**Month** grid (multi-day events render as spanning bars) and an hourly **Week** grid —
+toggle Month/Week, page with ‹ Prev / Today / Next ›. The **small view** (thumbnail/filler)
+stays a compact agenda of the next `max_events`.
 
 ### Tile and filler assignment
 
