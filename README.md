@@ -175,6 +175,13 @@ plugins:
       # - name: "Work"
       #   color: "#0b8043"
       #   ics_url: "https://example.com/work.ics"
+  clock:
+    location: "Warsaw"         # city or "lat,lon" — drives weather (Open-Meteo, no key) + local-news query
+    news_locale: "pl-PL"       # lang-region for the derived local-news feed
+    news_feeds:                # explicit RSS feeds, merged with the derived local feed
+      - "https://news.google.com/rss/search?q=US%20stock%20market&hl=en-US&gl=US&ceid=US:en"
+      - "https://news.google.com/rss/search?q=GPW%20gie%C5%82da&hl=pl&gl=PL&ceid=PL:pl"
+    max_news: 10
 ```
 
 The calendar's **big view** (when assigned to the main/spotlight pane) is a browsable
@@ -194,7 +201,7 @@ the git-ignored `state.local.json`.
 
 | Plugin | id | Description |
 |--------|----|-------------|
-| Clock | `clock` | Live clock widget (no backend) |
+| Clock | `clock` | Live clock; **big view** adds current weather + 3-day forecast (Open-Meteo, no key) and an aggregated stock/local **news** feed; small view = clock + compact weather |
 | Calendar | `calendar` | Multi-source ICS calendar merged into a day view |
 
 ### Dev workflow
