@@ -178,3 +178,89 @@ def test_fetch_reports_max_events(monkeypatch):
     assert b.fetch(base, now=now)["max_events"] == 5                        # default 5
     assert b.fetch({**base, "max_events": 8}, now=now)["max_events"] == 8   # override honored
     assert b.fetch({**base, "max_events": "0"}, now=now)["max_events"] == 5  # invalid -> default
+
+# ── EXDATE: cancelled instances are suppressed, others remain ─────────────────
+def test_exdate_suppresses_one_occurrence():
+    b = _backend()
+    evs = b.parse_ics(Path("tests/fixtures/cal_exdate.ics").read_text())
+    w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
+    occ = b.expand(evs, w0, w0 + timedelta(days=30))
+    dates = sorted(e["start"].date().isoformat() for e in occ)
+    # Mondays Jun29, Jul6, Jul13, Jul20; EXDATE removes Jul6 (COUNT still counts it)
+    assert dates == ["2026-06-29", "2026-07-13", "2026-07-20"]
+
+def test_exdate_parses_multiple_comma_values_with_tzid():
+    b = _backend()
+    ics = (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+        "BEGIN:VEVENT\r\nUID:exm\r\nSUMMARY:M\r\n"
+        "DTSTART:20260629T090000Z\r\nDTEND:20260629T093000Z\r\n"
+        "RRULE:FREQ=DAILY\r\n"
+        "EXDATE;TZID=Europe/Warsaw:20260630T110000,20260701T110000\r\n"
+        "END:VEVENT\r\nEND:VCALENDAR\r\n"
+    )
+    evs = b.parse_ics(ics)
+    # Warsaw 11:00 summer = 09:00 UTC -> both occurrences cancelled
+    assert evs[0]["exdate"] == {
+        datetime(2026, 6, 30, 9, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 1, 9, 0, tzinfo=timezone.utc),
+    }
+    w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
+    occ = b.expand(evs, w0, w0 + timedelta(days=5))
+    dates = sorted(e["start"].date().isoformat() for e in occ)
+    assert "2026-06-30" not in dates and "2026-07-01" not in dates
+    assert "2026-06-29" in dates
+
+# ── RECURRENCE-ID override: moved instance replaces the original occurrence ────
+def test_recurrence_id_override_replaces_occurrence():
+    b = _backend()
+    evs = b.parse_ics(Path("tests/fixtures/cal_override.ics").read_text())
+    w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
+    occ = [e for e in b.expand(evs, w0, w0 + timedelta(days=10))
+           if e["summary"] == "Daily Series"]
+    starts = sorted(e["start"] for e in occ)
+    # original Jun30 09:00 suppressed; override at Jun30 14:00 emitted instead
+    assert datetime(2026, 6, 30, 9, 0, tzinfo=timezone.utc) not in starts
+    assert datetime(2026, 6, 30, 14, 0, tzinfo=timezone.utc) in starts
+    assert starts == [
+        datetime(2026, 6, 29, 9, 0, tzinfo=timezone.utc),
+        datetime(2026, 6, 30, 14, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 1, 9, 0, tzinfo=timezone.utc),
+    ]
+
+# ── Expand from window_start: no-COUNT series fast-forwards; COUNT counts from DTSTART
+def test_daily_no_count_expands_only_within_window():
+    b = _backend()
+    ics = ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:old\r\nSUMMARY:Old Daily\r\n"
+           "DTSTART:20240630T090000Z\r\nDTEND:20240630T093000Z\r\n"
+           "RRULE:FREQ=DAILY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+    evs = b.parse_ics(ics)
+    w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
+    occ = b.expand(evs, w0, w0 + timedelta(days=10))
+    dates = sorted(e["start"].date().isoformat() for e in occ)
+    # DTSTART 2 years ago, no COUNT -> only ~window occurrences, not hundreds
+    assert len(occ) <= 12
+    assert dates[0] == "2026-06-28"
+    assert dates[-1] == "2026-07-07"
+
+def test_daily_count_counts_from_dtstart_not_window():
+    b = _backend()
+    # COUNT=3 from 2024 -> all 3 occurrences are long before the 2026 window
+    ics = ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:oc\r\nSUMMARY:Old Count\r\n"
+           "DTSTART:20240630T090000Z\r\nDTEND:20240630T093000Z\r\n"
+           "RRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+    evs = b.parse_ics(ics)
+    w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
+    occ = b.expand(evs, w0, w0 + timedelta(days=10))
+    assert occ == []
+
+def test_weekly_no_count_fast_forwards_to_window():
+    b = _backend()
+    ics = ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:ow\r\nSUMMARY:Old Weekly\r\n"
+           "DTSTART:20240701T090000Z\r\nDTEND:20240701T093000Z\r\n"  # Mon 2024-07-01
+           "RRULE:FREQ=WEEKLY;BYDAY=MO\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+    evs = b.parse_ics(ics)
+    w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
+    occ = b.expand(evs, w0, w0 + timedelta(days=21))
+    dates = sorted(e["start"].date().isoformat() for e in occ)
+    assert dates == ["2026-06-29", "2026-07-06", "2026-07-13"]  # Mondays in window
