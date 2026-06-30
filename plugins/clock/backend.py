@@ -31,9 +31,11 @@ def _pos_int(value, default):
         return default
     return n if n > 0 else default
 
+_MAX_BYTES = 4 * 1024 * 1024   # cap untrusted feed size before XML/JSON parse (kiosk safety)
+
 def _http_get(url):
     with urllib.request.urlopen(url, timeout=15) as r:
-        return r.read().decode("utf-8", "replace")
+        return r.read(_MAX_BYTES).decode("utf-8", "replace")
 
 def _geocode(location):
     parts = location.split(",")
