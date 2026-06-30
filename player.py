@@ -634,11 +634,16 @@ loadState();
             + panes + script)
 
 
+def _pick_worker(lens_id):
+    tier = request.args.get("tier", "sub")
+    return (MAIN_WORKERS.get(lens_id) if tier == "main" else WORKERS.get(lens_id))
+
+
 @app.route("/stream/<lens_id>")
 def stream(lens_id):
-    w = WORKERS.get(lens_id)
+    w = _pick_worker(lens_id)
     if not w:
-        return "no such lens", 404
+        return "no such stream", 404
 
     def gen():
         period = 1.0 / max(CFG["player"].get("target_fps", 15), 1)
@@ -653,18 +658,24 @@ def stream(lens_id):
 
 @app.route("/snapshot/<lens_id>")
 def snapshot(lens_id):
-    w = WORKERS.get(lens_id)
+    w = _pick_worker(lens_id)
     if not w:
-        return "no such lens", 404
+        return "no such stream", 404
     jpg = w.get_jpeg()
     return Response(jpg, mimetype="image/jpeg") if jpg else ("no frame", 503)
 
 
 @app.route("/status")
 def status():
-    return jsonify([{"id": w.id, "name": w.name, "status": w.status,
-                     "resolution": w.resolution, "fps": w.fps, "stream": w.stream_mode}
-                    for w in WORKERS.values()])
+    out = []
+    for w in WORKERS.values():
+        m = MAIN_WORKERS.get(w.id)
+        out.append({"id": w.id, "name": w.name, "status": w.status,
+                    "resolution": w.resolution, "fps": w.fps, "tier": w.tier,
+                    "main_ready": bool(m and getattr(m, "ready", False)),
+                    "main_resolution": (m.resolution if m else None),
+                    "main_fps": (m.fps if m else None)})
+    return jsonify(out)
 
 
 @app.route("/api/streams", methods=["POST"])
