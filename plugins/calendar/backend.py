@@ -7,6 +7,15 @@ from zoneinfo import ZoneInfo
 
 _WEEKDAYS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
 
+def _pos_int(value, default):
+    # positive-int coercion: missing / non-numeric / <=0 -> default. Structurally
+    # prevents zero/negative steps (RRULE INTERVAL=0 DoS) and zero/negative windows.
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return n if n > 0 else default
+
 def _http_get(url):
     with urllib.request.urlopen(url, timeout=15) as r:
         return r.read().decode("utf-8", "replace")
@@ -42,6 +51,10 @@ def parse_ics(text):
             cur = {"summary": "", "start": None, "end": None, "allday": False, "rrule": None}
         elif line == "END:VEVENT":
             if cur and cur["start"] is not None:
+                # RFC 5545: an all-day (DATE) event with no/zero-length DTEND covers
+                # exactly one day. Set the exclusive end so it never renders zero-width.
+                if cur["allday"] and (cur["end"] is None or cur["end"] == cur["start"]):
+                    cur["end"] = cur["start"] + timedelta(days=1)
                 events.append(cur)
             cur = None
         elif cur is not None and ":" in line:
@@ -78,7 +91,7 @@ def expand(events, window_start, window_end):
                 out.append({**e, "end": e["start"] + dur})
             continue
         freq = rule.get("FREQ")
-        interval = int(rule.get("INTERVAL", 1) or 1)
+        interval = _pos_int(rule.get("INTERVAL"), 1)
         count = int(rule["COUNT"]) if "COUNT" in rule else None
         until = _rrule_until(rule)
         emitted = 0
@@ -124,9 +137,9 @@ def expand(events, window_start, window_end):
     return out
 
 def fetch(config, now=None):
-    lookback = int(config.get("lookback_days", 90) or 90)
-    lookahead = int(config.get("lookahead_days", 365) or 365)
-    cap = int(config.get("max_events_grid", 2000) or 2000)
+    lookback = _pos_int(config.get("lookback_days"), 90)
+    lookahead = _pos_int(config.get("lookahead_days"), 365)
+    cap = _pos_int(config.get("max_events_grid"), 2000)
     sources = config.get("sources", []) or []
     now = now or datetime.now(timezone.utc)
     w0 = now - timedelta(days=lookback)
@@ -152,7 +165,8 @@ def fetch(config, now=None):
     events = merged[:cap]
     for e in events:
         del e["_sortkey"]
-    out = {"events": events, "generated": now.isoformat()}
+    out = {"events": events, "generated": now.isoformat(),
+           "max_events": _pos_int(config.get("max_events"), 5)}
     if truncated:
         out["truncated"] = True
     if errors:

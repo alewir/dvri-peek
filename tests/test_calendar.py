@@ -113,3 +113,68 @@ def test_allday_multiday_exclusive_end():
     # DTSTART 07-03, DTEND 07-08 (exclusive) -> covers 07-03..07-07
     assert evs[0]["start"] == datetime(2026, 7, 3, tzinfo=timezone.utc)
     assert evs[0]["end"] == datetime(2026, 7, 8, tzinfo=timezone.utc)
+
+# ── BLOCKER 1: RRULE INTERVAL=0 must not infinite-loop (DoS) ──────────────────
+# Causal: a zero step never advances `cur`/`base`, so a no-COUNT/no-UNTIL rule would
+# loop forever. _pos_int coerces INTERVAL=0 -> 1, so expand() terminates with a
+# small, finite count bounded by the window. (If the fix regresses, these HANG.)
+def test_rrule_daily_interval_zero_terminates():
+    b = _backend()
+    ics = ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:d0\r\nSUMMARY:Z\r\n"
+           "DTSTART:20260629T090000Z\r\nDTEND:20260629T093000Z\r\n"
+           "RRULE:FREQ=DAILY;INTERVAL=0\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+    evs = b.parse_ics(ics)
+    w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
+    occ = b.expand(evs, w0, w0 + timedelta(days=10))
+    assert 0 < len(occ) <= 12          # INTERVAL=0 -> 1: daily, bounded by the window
+
+def test_rrule_weekly_interval_zero_terminates():
+    b = _backend()
+    ics = ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:w0\r\nSUMMARY:Z\r\n"
+           "DTSTART:20260629T090000Z\r\nDTEND:20260629T093000Z\r\n"
+           "RRULE:FREQ=WEEKLY;INTERVAL=0\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+    evs = b.parse_ics(ics)
+    w0 = datetime(2026, 6, 28, tzinfo=timezone.utc)
+    occ = b.expand(evs, w0, w0 + timedelta(days=21))
+    assert 0 < len(occ) <= 6           # INTERVAL=0 -> 1: weekly, bounded by the window
+
+# ── BLOCKER 2: end-less all-day event covers exactly one day (RFC 5545) ───────
+def test_allday_endless_end_is_start_plus_one():
+    b = _backend()
+    evs = b.parse_ics(Path("tests/fixtures/cal_endless_allday.ics").read_text())
+    assert len(evs) == 1 and evs[0]["allday"] is True
+    assert evs[0]["start"] == datetime(2026, 7, 4, tzinfo=timezone.utc)
+    # no DTEND -> exclusive end is start + 1 day (so it never renders zero-width)
+    assert evs[0]["end"] == datetime(2026, 7, 5, tzinfo=timezone.utc)
+
+def test_fetch_includes_endless_allday(monkeypatch):
+    b = _backend()
+    feed = Path("tests/fixtures/cal_endless_allday.ics").read_text()
+    monkeypatch.setattr(b, "_http_get", lambda url: feed)
+    out = b.fetch({"sources": [{"name": "A", "color": "#111", "ics_url": "A"}]},
+                  now=datetime(2026, 7, 1, tzinfo=timezone.utc))
+    ev = [e for e in out["events"] if e["title"] == "Holiday"]
+    assert len(ev) == 1 and ev[0]["allday"] is True
+    assert ev[0]["end"] == datetime(2026, 7, 5, tzinfo=timezone.utc).isoformat()
+
+# ── BLOCKER 1 / FOLLOW-UP B: config coercion via _pos_int ────────────────────
+def test_fetch_zero_config_falls_back_to_defaults(monkeypatch):
+    b = _backend()
+    # ~200 days out: only included if lookahead_days "0" falls back to 365 (not 0)
+    far = ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:f\r\nSUMMARY:Far\r\n"
+           "DTSTART:20270115T090000Z\r\nDTEND:20270115T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+    monkeypatch.setattr(b, "_http_get", lambda url: far)
+    out = b.fetch({"lookback_days": "0", "lookahead_days": "0", "max_events_grid": "0",
+                   "sources": [{"name": "A", "color": "#111", "ics_url": "A"}]},
+                  now=datetime(2026, 6, 28, tzinfo=timezone.utc))
+    assert any(e["title"] == "Far" for e in out["events"])   # lookahead "0" -> 365 default
+
+def test_fetch_reports_max_events(monkeypatch):
+    b = _backend()
+    feed = Path("tests/fixtures/cal_a.ics").read_text()
+    monkeypatch.setattr(b, "_http_get", lambda url: feed)
+    base = {"sources": [{"name": "A", "color": "#111", "ics_url": "A"}]}
+    now = datetime(2026, 6, 28, tzinfo=timezone.utc)
+    assert b.fetch(base, now=now)["max_events"] == 5                        # default 5
+    assert b.fetch({**base, "max_events": 8}, now=now)["max_events"] == 8   # override honored
+    assert b.fetch({**base, "max_events": "0"}, now=now)["max_events"] == 5  # invalid -> default

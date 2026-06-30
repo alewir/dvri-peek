@@ -114,6 +114,7 @@ def test_small_agenda_overflow_hidden_and_fixed_count():
     # the small preview agenda no longer scrolls (clickcatch owns the whole tile)
     assert '.agenda{height:100%;overflow:hidden' in compact
     assert '.agenda{height:100%;overflow:auto' not in compact
-    # renderAgenda shows a fixed few upcoming items that fit the tile
-    assert 'const max=5,' in h
-    assert 'const max=12,' not in h
+    # renderAgenda shows a backend-driven few upcoming items that fit the tile;
+    # default 5 (when max_events is unset) preserves the no-scroll fit-to-tile behavior
+    assert 'const max=MAXAG,' in h
+    assert 'MAXAG=d.max_events||5' in h

@@ -147,6 +147,8 @@ const MS_DAY=86400000;
 // in-flow chip spacer and the absolute span overlay stay pixel-aligned.
 const BAR_H=15, BAR_GAP=2, DATE_H=18;   // DATE_H = cell padding-top(2) + date height(16)
 let EVENTS=[], NOW=new Date(), WIN0=null, WIN1=null;   // WIN0/WIN1 = fetched window bounds
+let MAXAG=5;                       // small-agenda size (backend max_events; 5 = fit-to-tile no-scroll)
+let lastWeekKey=null;              // week view: gate scroll-to-07:00 to first-paint / nav only
 let MODE=localStorage.getItem("cal.viewmode")||"month";
 // init the visible period to TODAY's month/week per the persisted mode (not the 1st of the month)
 let CUR=MODE==="week"?startOfWeek(new Date()):startOfMonth(new Date());
@@ -200,6 +202,7 @@ async function load(){
     const d=await (await fetch("/plugin/calendar/data")).json();
     if(d.error){showErr(d.error);return;}
     EVENTS=(d.events||[]).filter(e=>e&&e.start);
+    MAXAG=d.max_events||5;
     if(!EVENTS.length && d.errors){showErr("calendar feeds unavailable");return;}
     if(EVENTS.length){WIN0=new Date(EVENTS[0].start);WIN1=new Date(EVENTS[EVENTS.length-1].start);}
     render();
@@ -216,7 +219,7 @@ function render(){
 function renderAgenda(){
   // small preview: a fixed few upcoming items that FIT the tile (no scrollbar — the tile
   // is clickable end-to-end to promote it; the big month/week view shows everything)
-  const max=5, up=EVENTS.filter(e=>new Date(e.end||e.start)>=NOW).slice(0,max);
+  const max=MAXAG, up=EVENTS.filter(e=>new Date(e.end||e.start)>=NOW).slice(0,max);
   const a=document.getElementById("agenda");
   if(!up.length){a.innerHTML='<div class="err" style="opacity:.6">No upcoming events</div>';return;}
   a.innerHTML=up.map(e=>{
@@ -237,7 +240,9 @@ function renderMonth(){
   // range [s, eExcl): all-day end is already exclusive; timed end is inclusive → +1.
   const spans=EVENTS.filter(e=>e.allday || (dnum(new Date(e.end||e.start))>dnum(new Date(e.start))))
     .map(e=>{const s=dnum(new Date(e.start));
-            let eend=dnum(new Date(e.end||e.start)); if(!e.allday) eend+=1;   // end-less → single day
+            let eend=dnum(new Date(e.end||e.start));
+            if(e.allday) eend=Math.max(eend,s+1);   // end-less all-day → at least one day
+            else eend+=1;                            // timed inclusive end → exclusive
             return {e,s,eExcl:eend};})
     .filter(x=>x.eExcl>weekStartIdx && x.s<gridEndIdx);
   // Global lane assignment (clamped to the visible window) so a multi-week event
@@ -270,7 +275,9 @@ function renderMonth(){
     const row=document.createElement("div"); row.className="cal-weekrow";
     const reservedH=(weekMaxLane[w]+1)*(BAR_H+BAR_GAP);   // 0 when this week has no spans
     for(let c=0;c<7;c++){
-      const idx=w*7+c, d=new Date(gridStart.getTime()+idx*MS_DAY);
+      // calendar-date overflow (not ms arithmetic) so cells stay on true local
+      // midnight across DST transitions (e.g. the October CEST→CET off-by-one).
+      const idx=w*7+c, d=new Date(gridStart.getFullYear(),gridStart.getMonth(),gridStart.getDate()+idx);
       const cell=document.createElement("div");
       cell.className="cal-cell"+(d.getMonth()!=CUR.getMonth()?" dim":"")+(sameDay(d,NOW)?" today":"");
       cell.dataset.idx=idx;
@@ -304,6 +311,9 @@ function renderMonth(){
 
 function renderWeek(){
   const body=document.getElementById("cal-body");
+  // capture the live scroll BEFORE the innerHTML rebuild destroys .cal-hours, so a
+  // periodic refresh of the SAME week can restore it instead of jumping to 07:00.
+  const prevHrs=body.querySelector(".cal-hours"), prevScroll=prevHrs?prevHrs.scrollTop:null;
   const ws=startOfWeek(CUR), wsIdx=dnum(ws);
   const days=[...Array(7)].map((_,i)=>new Date(ws.getTime()+i*MS_DAY));
   document.getElementById("cal-label").textContent=
@@ -343,7 +353,7 @@ function renderWeek(){
   // so gridColumn actually spans (display:grid on the band, same pattern as Month overlay)
   const adRow=body.querySelector(".cal-allday");
   EVENTS.filter(e=>e.allday).forEach(e=>{
-    const s=dnum(new Date(e.start)), eExcl=dnum(new Date(e.end||e.start));
+    const s=dnum(new Date(e.start)), eExcl=Math.max(dnum(new Date(e.end||e.start)),s+1);   // end-less all-day → ≥1 day
     const c0=Math.max(s,wsIdx)-wsIdx, c1=Math.min(eExcl,wsIdx+7)-1-wsIdx;
     if(c1<c0||c1<0||c0>6) return;
     const bar=document.createElement("div"); bar.className="spanbar";
@@ -372,8 +382,11 @@ function renderWeek(){
   });
 
   updateNavBounds();
-  // scroll to ~07:00 so morning events are immediately visible
-  const hrs=body.querySelector(".cal-hours"); if(hrs) hrs.scrollTop=7*HOUR;
+  // first paint of a week / nav → scroll to ~07:00; periodic refresh of the same
+  // week → preserve the user's scroll position across the rebuild.
+  const hrs=body.querySelector(".cal-hours");
+  if(hrs) hrs.scrollTop=(wsIdx===lastWeekKey && prevScroll!=null) ? prevScroll : 7*HOUR;
+  lastWeekKey=wsIdx;
 }
 
 function updateNavBounds(){

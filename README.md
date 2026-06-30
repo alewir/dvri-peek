@@ -160,7 +160,7 @@ plugins:
     lookback_days: 90        # how far back the fetched window starts
     lookahead_days: 365      # how far ahead it reaches (big-view browsing is bounded to this window)
     max_events_grid: 2000    # safety cap on total expanded events in the dataset
-    max_events: 12           # small-view agenda slice (next N upcoming), applied client-side
+    max_events: 5            # small-view agenda slice (next N upcoming); default 5 keeps it no-scroll in the tile
     sources:
       - name: "Personal"
         color: "#4285f4"     # source color for chips/bars/dots
