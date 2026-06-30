@@ -180,7 +180,9 @@ plugins:
 The calendar's **big view** (when assigned to the main/spotlight pane) is a browsable
 **Month** grid (multi-day events render as spanning bars) and an hourly **Week** grid —
 toggle Month/Week, page with ‹ Prev / Today / Next ›. The **small view** (thumbnail/filler)
-stays a compact agenda of the next `max_events`.
+stays a compact agenda of the next `max_events`. Multiple `sources` are merged + colour-coded;
+recurring events are expanded in-window (DAILY/WEEKLY incl. `BYDAY`/`COUNT`/`UNTIL`), honouring
+**EXDATE** (cancelled instances) and **RECURRENCE-ID** (rescheduled instances).
 
 ### Tile and filler assignment
 
@@ -323,9 +325,16 @@ logs with `journalctl -u dvri-peek -f`.
    `dvrip://…?channel=N&subtype=M` source (plus an optional RTSP fallback).
 2. It launches `go2rtc`, which performs the DVRIP login + stream and **re-publishes
    each lens as plain RTSP** on `localhost`.
-3. One OpenCV worker per lens pulls that RTSP, decodes H.264/H.265, and re-encodes
-   to JPEG.
-4. Flask serves an MJPEG stream per lens and the tabbed spotlight/grid UI.
+3. Per lens an always-on **sub** worker decodes the low-res restream (feeds the live
+   previews); an on-demand **main** worker is started for the selected lens (feeds the
+   big pane). Each OpenCV worker decodes H.264/H.265 and re-encodes to JPEG.
+4. Flask serves a per-tier MJPEG stream (`/stream/<lens>[?tier=main]`) and the tabbed
+   spotlight/grid UI. The big pane shows the sub stream instantly, then swaps to main
+   once it has frames (progressive load); hidden tabs pause to keep browser connections
+   under the ~6-per-host limit.
+
+For the full module map, runtime components, and data flow, see **[`.meta/architecture.md`](.meta/architecture.md)**
+(and **[`.meta/rtsp.md`](.meta/rtsp.md)** for the DVRIP/multi-lens protocol details).
 
 ## Credits
 
