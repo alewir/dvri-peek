@@ -232,7 +232,9 @@ sudo reboot
 ```
 
 `deploy/setup-pi.sh` installs deps, the arch-correct go2rtc, the systemd service,
-the kiosk autostart, and all the SD-card-sparing tweaks below. After reboot the
+the kiosk autostart, the SD-card-sparing tweaks, and the 24/7 no-powersave hardening
+(WiFi power-save off + infinite reconnect, USB autosuspend off, suspend masked, CPU
+performance governor) below. After reboot the
 Pi autologins and opens the dashboard fullscreen.
 
 ### Manual, step by step (every aspect)
@@ -302,7 +304,24 @@ Pi autologins and opens the dashboard fullscreen.
    sudo raspi-config nonint do_blanking 1
    ```
 
-9. **Reboot & verify**
+9. **24/7 no-powersave hardening** (`setup-pi.sh` does all of this automatically) — a
+   wall kiosk must never sleep, blank, drop WiFi, or throttle:
+   ```bash
+   # WiFi radio power-save OFF (global) + never stop reconnecting on the WiFi connection
+   printf '[connection]\nwifi.powersave = 2\n' | sudo tee /etc/NetworkManager/conf.d/wifi-powersave-off.conf
+   nmcli connection modify "$(nmcli -t -f NAME,TYPE c show | awk -F: '/wireless/{print $1;exit}')" \
+     802-11-wireless.powersave 2 connection.autoconnect-retries 0
+   # USB autosuspend OFF (keeps an attached SSD / peripherals from dropping)
+   printf 'ACTION=="add", SUBSYSTEM=="usb", TEST=="power/control", ATTR{power/control}="on"\n' | \
+     sudo tee /etc/udev/rules.d/50-usb-no-autosuspend.rules
+   # never suspend/sleep; force CPU performance governor (lossless decode)
+   sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+   ```
+   > **Reboot required:** the WiFi `conf.d` is read by NetworkManager at boot — power-save
+   > stays *enabled* until the next reboot. Verify after: `nmcli -t -f 802-11-wireless.powersave
+   > c show <wifi-conn>` → `disable`, and `dmesg | grep 'power save'` → `power save disabled`.
+
+10. **Reboot & verify**
    ```bash
    sudo reboot
    # after boot, from any machine:

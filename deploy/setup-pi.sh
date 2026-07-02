@@ -4,8 +4,10 @@
 #  Run on the Pi from the cloned repo:   bash deploy/setup-pi.sh
 #
 #  Sets up: apt deps, arch-correct go2rtc, a systemd service for the player,
-#  a labwc kiosk autostart, screen-blanking off, and SD-card-sparing settings
-#  (Chromium profile/cache in RAM, journald capped).
+#  a labwc kiosk autostart, screen-blanking off, SD-card-sparing settings
+#  (Chromium profile/cache in RAM, journald capped), and 24/7 no-powersave
+#  hardening (WiFi power-save off + infinite reconnect, USB autosuspend off,
+#  suspend/sleep masked, CPU performance governor).
 #  Assumes Raspberry Pi OS (desktop) with autologin already enabled
 #  (raspi-config -> System Options -> Boot/Auto Login -> Desktop Autologin).
 # ============================================================================
@@ -68,5 +70,29 @@ sudo mkdir -p /etc/systemd/journald.conf.d
 printf "[Journal]\nSystemMaxUse=50M\nRuntimeMaxUse=50M\n" | \
   sudo tee /etc/systemd/journald.conf.d/cap.conf >/dev/null
 sudo systemctl restart systemd-journald || true
+
+# --- 7) 24/7 no-powersave hardening (WiFi/USB/suspend) + CPU performance -------
+echo ">> applying 24/7 no-powersave hardening..."
+# WiFi: disable radio power-save globally (portable, no connection-name dependency)
+sudo mkdir -p /etc/NetworkManager/conf.d
+printf "[connection]\nwifi.powersave = 2\n" | \
+  sudo tee /etc/NetworkManager/conf.d/wifi-powersave-off.conf >/dev/null
+# + never give up reconnecting on the active WiFi connection
+WCON="$(nmcli -t -f NAME,TYPE connection show 2>/dev/null | awk -F: '/wireless/{print $1; exit}')"
+[ -n "$WCON" ] && sudo nmcli connection modify "$WCON" \
+  802-11-wireless.powersave 2 connection.autoconnect-retries 0 2>/dev/null || true
+# USB autosuspend off (keeps an attached SSD / peripherals from spinning down/dropping)
+printf 'ACTION=="add", SUBSYSTEM=="usb", TEST=="power/control", ATTR{power/control}="on"\n' | \
+  sudo tee /etc/udev/rules.d/50-usb-no-autosuspend.rules >/dev/null
+echo -1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null 2>&1 || true
+# never suspend/sleep/hibernate (a kiosk stays on)
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
+# CPU performance governor (lossless/consistent stream decode), persistent across reboots
+printf '#!/bin/sh\nfor g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance > "$g"; done\n' | \
+  sudo tee /usr/local/bin/cpu-performance.sh >/dev/null
+sudo chmod +x /usr/local/bin/cpu-performance.sh
+printf '[Unit]\nDescription=Force CPU performance governor (24/7 kiosk)\n[Service]\nType=oneshot\nExecStart=/usr/local/bin/cpu-performance.sh\n[Install]\nWantedBy=multi-user.target\n' | \
+  sudo tee /etc/systemd/system/cpu-performance.service >/dev/null
+sudo systemctl daemon-reload && sudo systemctl enable --now cpu-performance.service >/dev/null 2>&1 || true
 
 echo ">> done. Service: $(systemctl is-active dvri-peek.service). Reboot to start the kiosk:  sudo reboot"
