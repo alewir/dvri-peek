@@ -424,8 +424,11 @@ function pauseHiddenStreams(){
     d.querySelectorAll('img.cam').forEach(img=>{
       if(active){
         if(img.dataset.psrc){ img.src=img.dataset.psrc; delete img.dataset.psrc; }
-      } else if(img.getAttribute('src')){
-        // 'data:,' (not '') reliably aborts the MJPEG socket in Chromium; '' can leave it half-open
+      } else if(!img.dataset.psrc && img.getAttribute('src')){
+        // Stash the real URL only on the FIRST hide (idempotent). 'data:,' reliably aborts the
+        // MJPEG socket in Chromium ('' can leave it half-open) — but it is TRUTHY, so without the
+        // !psrc guard a second call while hidden would re-stash 'data:,' and the stream would
+        // never resume when the tab returns.
         img.dataset.psrc=img.getAttribute('src'); img.src='data:,';
       }
     });

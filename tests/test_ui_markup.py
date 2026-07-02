@@ -211,6 +211,7 @@ def test_stream_lifecycle_client_logic():
     H = (ROOT / "player.py").read_text()
     assert "function pauseHiddenStreams" in H          # hidden-tab pause exists
     assert "dataset.psrc" in H                          # paused src is stashed/restored
+    assert "!img.dataset.psrc" in H                     # pause is idempotent (no re-stash of 'data:,' → blank on tab return)
     assert "pauseHiddenStreams()" in H                  # called (showTab/loadState)
     assert "?tier=main" in H                            # big-pane sub->main swap target
     assert "main_ready" in H                            # swap gated on main_ready
