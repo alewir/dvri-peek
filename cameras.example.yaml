@@ -46,6 +46,7 @@ devices:
   - id: nvr1
     name: "NVR"
     layout: grid                      # simple responsive grid
+    grid_tier: main                   # render grid cells in HD/main (default: sub). grid layout only.
     host: "192.168.1.101"             # <-- your NVR IP
     dvrip_port: 34567
     rtsp_port: 554

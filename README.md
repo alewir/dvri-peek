@@ -107,6 +107,11 @@ full annotated template). Per device you set the host, ports, credentials, a
 DVRIP `channel`. A lens may add `rtsp_channel` for an RTSP fallback. The player
 generates `go2rtc.generated.yaml` from this on every start.
 
+A `grid` device may add `grid_tier: main` to render its cells in full resolution
+(HD) instead of the low-res sub-stream — e.g. an NVR whose channels you want in
+HD. Default is `sub`. (`spotlight` previews always use sub; the big pane upgrades
+to HD on selection.)
+
 ## Plugins
 
 dvri-peek supports **dashboard tile plugins** — iframe-embedded widgets that sit

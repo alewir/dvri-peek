@@ -695,7 +695,11 @@ loadState();
 
 def _pick_worker(lens_id):
     tier = request.args.get("tier", "sub")
-    return (MAIN_WORKERS.get(lens_id) if tier == "main" else WORKERS.get(lens_id))
+    if tier == "main":
+        # fall back to the base worker when no on-demand main exists — the base is already
+        # HD for grid devices flagged `grid_tier: main` (avoids a duplicate HD decode + 404).
+        return MAIN_WORKERS.get(lens_id) or WORKERS.get(lens_id)
+    return WORKERS.get(lens_id)
 
 
 @app.route("/stream/<lens_id>")
@@ -742,7 +746,8 @@ def api_streams():
     data = request.get_json(force=True, silent=True) or {}
     main_set = set(data.get("main", []))
     for lid in main_set:
-        if lid in WORKERS:
+        # a base-HD lens (grid_tier: main) already streams main — no on-demand duplicate.
+        if lid in WORKERS and WORKERS[lid].tier != "main":
             _start_main_worker(lid)
     for lid in list(MAIN_WORKERS):
         if lid not in main_set:
@@ -780,9 +785,17 @@ def bootstrap(config_path=None, start_workers=True, start_gateway=True,
         LENS_META[lid] = {"name": meta["name"]}
     if start_workers:
         gw = CFG.get("gateway", {})
+        # Base worker tier per lens: HD (main) for grid devices flagged `grid_tier: main`
+        # (e.g. an NVR that should render its channels in full resolution), sub otherwise.
+        # Spotlight previews stay sub — their big pane upgrades to main on-demand.
+        lens_tier = {}
+        for dev in DEVICES:
+            base = "main" if (dev.get("layout") == "grid" and dev.get("grid_tier") == "main") else "sub"
+            for ln in dev["lenses"]:
+                lens_tier[ln["id"]] = base
         for lid, meta in lens_index.items():
             w = LensWorker(lid, meta["name"], gw, pl.get("jpeg_quality", 75),
-                           pl.get("target_fps", 15), "sub")
+                           pl.get("target_fps", 15), lens_tier.get(lid, "sub"))
             WORKERS[lid] = w
             w.start()
 
