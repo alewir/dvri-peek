@@ -55,12 +55,12 @@ def _weather(location):
     url = ("https://api.open-meteo.com/v1/forecast"
            f"?latitude={lat}&longitude={lon}&timezone=auto&temperature_unit=celsius"
            "&current=temperature_2m,weather_code"
-           "&daily=weather_code,temperature_2m_max,temperature_2m_min&forecast_days=4")
+           "&daily=weather_code,temperature_2m_max,temperature_2m_min&forecast_days=6")
     d = json.loads(_http_get(url))
     cur, dy = d["current"], d["daily"]
     text, emoji = _wmo(cur["weather_code"])
     forecast = []
-    for i in range(1, min(4, len(dy["time"]))):
+    for i in range(1, min(6, len(dy["time"]))):   # today + next 5 days
         _, e2 = _wmo(dy["weather_code"][i])
         forecast.append({"day": datetime.fromisoformat(dy["time"][i]).strftime("%a"),
                          "hi": round(dy["temperature_2m_max"][i]),

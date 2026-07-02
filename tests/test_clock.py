@@ -20,7 +20,7 @@ def test_weather_parses_and_maps_code(monkeypatch):
     assert w["temp"] == 21 and w["units"] == "°C"
     assert w["text"] == "Clear" and w["emoji"] == "☀"     # WMO 0
     assert w["today"] == {"hi": 24, "lo": 13}
-    assert len(w["forecast"]) == 3 and w["forecast"][0]["day"] == "Wed"  # 2026-07-01
+    assert len(w["forecast"]) == 5 and w["forecast"][0]["day"] == "Wed"  # today + next 5 days; [0]=2026-07-01
 
 def test_geocode_latlon_bypasses_http(monkeypatch):
     b = _backend()
