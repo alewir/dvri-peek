@@ -318,7 +318,10 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8">
  #revealbar::before{content:"";position:absolute;top:0;left:0;right:0;height:6px;background:#2563eb55}
  body.headerhidden #revealbar{display:block}
  /* settings mode */
- .picker-wrap{position:absolute;inset:auto 6px 6px 6px;z-index:5;display:none;
+ /* anchored to the tile TOP (not bottom) so the native <select> popup opens DOWN into the
+    screen — a bottom-anchored picker on the lowest tile dropped its list off the panel edge
+    (unusable by touch). */
+ .picker-wrap{position:absolute;inset:6px 6px auto 6px;z-index:5;display:none;
               background:rgba(14,14,16,.88);border-radius:5px;padding:3px 6px}
  body.settings .tile .picker-wrap,body.settings .cell .picker-wrap{display:flex;align-items:center;gap:5px}
  .picker-lbl{font-size:10px;font-weight:700;color:#9ca3af;white-space:nowrap;flex:0 0 auto;text-transform:uppercase;letter-spacing:.04em}
