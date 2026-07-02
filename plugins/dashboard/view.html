@@ -1,0 +1,474 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Clock &amp; Calendar</title>
+<style>
+ /* ── base — dark instrument cluster ───────────────────────── */
+ *{box-sizing:border-box}
+ html,body{margin:0;height:100%;background:#0e0e10;color:#e4e4e7;overflow:hidden;
+   font-family:system-ui,Segoe UI,Arial,sans-serif;font-variant-numeric:tabular-nums}
+ .rule{height:1px;background:rgba(232,164,74,.22);width:100%}
+
+ /* amber clock — the master gauge; tabular numerals + faint instrument glow */
+ .clock{font-weight:700;line-height:1;color:#e8c870;letter-spacing:-0.03em;
+   font-variant-numeric:tabular-nums;text-shadow:0 0 18px rgba(232,164,74,.20)}
+ .date{opacity:.5;letter-spacing:.16em;text-transform:uppercase;font-weight:400}
+
+ /* weather line (shared preview + rail) */
+ .wx{display:flex;align-items:center;flex-wrap:wrap;gap:.4em;font-weight:500}
+ .wx-hilo{opacity:.55;font-size:.8em}
+
+ /* ═══ PREVIEW (tile / filler) ═════════════════════════════════ */
+ #preview{height:100%;display:flex;flex-direction:column;
+   align-items:center;justify-content:center;gap:.35em;padding:3vh 4vw;overflow:hidden}
+ body[data-ctx="main"] #preview{display:none}
+ #pv-clock{font-size:7vw}
+ #pv-date{font-size:2.1vw;margin-top:-.15em}
+ #pv-wx{font-size:3vw;justify-content:center}
+ #pv-agenda{align-self:stretch;margin-top:.4em;overflow:hidden}
+ #pv-agenda .pv-ev{display:flex;align-items:center;gap:0;
+   font-size:clamp(10px,1.7vw,14px);padding:3px 0;border-top:1px solid #ffffff0d}
+ #pv-agenda .dot{display:inline-block;width:6px;height:6px;border-radius:50%;
+   flex:0 0 6px;margin-right:7px}
+ #pv-agenda .when{opacity:.5;white-space:nowrap;padding-right:8px;margin-right:8px;
+   border-right:1px solid #ffffff18;flex:0 0 auto}
+ #pv-agenda .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+ #pv-agenda .empty{opacity:.4;font-size:clamp(10px,1.7vw,14px);text-align:center;padding-top:.3em}
+
+ /* ═══ MAIN dashboard — rail | calendar / news band ════════════ */
+ #dash{height:100%;display:grid;
+   grid-template-columns:240px 1fr;grid-template-rows:1fr auto;
+   grid-template-areas:"rail cal" "news news"}
+ body:not([data-ctx="main"]) #dash{display:none}
+
+ /* left rail — the instrument stack */
+ #rail{grid-area:rail;min-height:0;overflow:hidden;padding:22px 18px;
+   border-right:1px solid #ffffff12;display:flex;flex-direction:column;gap:.5em}
+ #clock{font-size:52px}
+ #date{font-size:13px;margin-top:-.2em}
+ #rail .rule{margin:.35em 0 .1em}
+ #wx{font-size:20px}
+ #wx .wx-emoji{font-size:1.15em}
+ /* 5-day forecast — vertical list keyed to the rail width */
+ .fc-head{font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+   color:#6b7280;margin-top:.5em}
+ .fc{display:flex;flex-direction:column;width:100%}
+ .fc-item{display:grid;grid-template-columns:2.4em 1.5em 1fr;align-items:center;gap:.5em;
+   font-size:13px;padding:4px 0;border-top:1px solid #ffffff0d}
+ .fc-day{color:#6b7280;text-transform:uppercase;letter-spacing:.05em;font-size:11px}
+ .fc-ico{font-size:15px}
+ .fc-temps{text-align:right}
+ .fc-hi{color:#e4e4e7;font-weight:600}.fc-lo{color:#6b7280;margin-left:.3em}
+ /* "up next" agenda — fills the rail below the forecast with the nearest events */
+ #rail-next{margin-top:.7em;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+ .rn-head{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#6b7280;margin-bottom:.15em}
+ .rn-ev{display:flex;align-items:center;gap:.5em;font-size:12px;padding:4px 0;border-top:1px solid #ffffff0d}
+ .rn-dot{width:6px;height:6px;border-radius:50%;flex:0 0 6px}
+ .rn-when{color:#6b7280;white-space:nowrap;flex:0 0 auto;font-size:11px}
+ .rn-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+
+ /* calendar column */
+ #cal{grid-area:cal;min-width:0;min-height:0;display:flex;flex-direction:column}
+ #cal-controls{flex:0 0 auto;display:flex;align-items:center;gap:6px;
+   padding:8px 12px;border-bottom:1px solid #ffffff0f}
+ #cal-controls button{background:transparent;border:1px solid #ffffff1c;color:#a1a1aa;
+   border-radius:4px;padding:3px 10px;cursor:pointer;font-size:12px;letter-spacing:.02em;
+   transition:color .12s,border-color .12s}
+ #cal-controls button:hover:not(:disabled){color:#e4e4e7;border-color:#ffffff38}
+ #cal-controls button:disabled{opacity:.22;cursor:default}
+ #cal-label{font-size:14px;font-weight:600;letter-spacing:.05em;color:#e4e4e7;flex:1;text-align:center}
+ #cal-mode{flex:none}
+ #cal-body{flex:1 1 auto;min-height:0;overflow:hidden}
+ .err{color:#fca5a5;padding:10px;font-size:13px}
+
+ /* news band — TV-style slow crawl across the bottom */
+ #newsband{grid-area:news;min-width:0;display:flex;align-items:center;
+   overflow:hidden;padding:7px 14px;border-top:1px solid #ffffff12;background:#0b0b0d}
+ .news-eyebrow{flex:0 0 auto;font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+   color:#e8c870;opacity:.7;margin-right:14px}
+ .news-vp{flex:1 1 auto;min-width:0;overflow:hidden}
+ /* track holds the headlines TWICE; translating by -50% (one copy width) loops seamlessly.
+    duration is set in JS from the content width for a constant ~px/s crawl speed. */
+ .news-track{display:inline-flex;white-space:nowrap;will-change:transform;
+   animation:news-scroll linear infinite}
+ @keyframes news-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+ @media(prefers-reduced-motion:reduce){.news-track{animation:none}}
+ #newsband .ni{flex:0 0 auto;font-size:13px;line-height:1.2}
+ #newsband .ni::after{content:"◆";color:#e8c870;opacity:.32;margin:0 18px;font-size:8px;vertical-align:middle}
+ #newsband .src{opacity:.4;font-size:.85em}
+ #newsband .empty{opacity:.4;font-size:13px}
+
+ /* ── month grid (from calendar view) ──────────────────────── */
+ .cal-month{display:flex;flex-direction:column;height:100%}
+ .cal-dowrow{display:grid;grid-template-columns:repeat(7,1fr);flex:0 0 auto;border-bottom:1px solid #ffffff1c}
+ .cal-dow{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;padding:3px 6px}
+ .cal-weekrow{position:relative;flex:1 1 0;min-height:0;overflow:hidden;
+   display:grid;grid-template-columns:repeat(7,1fr)}
+ .cal-cell{position:relative;padding:2px 3px;overflow:hidden;min-height:0;display:flex;flex-direction:column;
+   border-right:1px solid #ffffff10;border-bottom:1px solid #ffffff10}
+ .cal-cell.dim .cal-date{opacity:.25;font-weight:400}
+ .cal-cell.dim .chip{opacity:.4}
+ @keyframes today-pulse{
+   0%,100%{box-shadow:inset 0 0 0 1px #2563eb,inset 0 0 6px #2563eb24}
+   50%    {box-shadow:inset 0 0 0 1px #3b82f6,inset 0 0 14px #3b82f644}
+ }
+ .cal-cell.today{animation:today-pulse 4s ease-in-out infinite}
+ .cal-cell.today .cal-date{color:#60a5fa;font-weight:700}
+ @media(prefers-reduced-motion:reduce){.cal-cell.today{animation:none;box-shadow:inset 0 0 0 1px #2563eb}}
+ .cal-date{font-size:12px;font-weight:600;line-height:16px;height:16px;color:#c4c4c8;flex:0 0 auto}
+ .cal-spanspace{flex:0 0 auto}
+ .cal-spanlayer{position:absolute;left:0;right:0;top:var(--date-h);
+   display:grid;grid-template-columns:repeat(7,1fr);
+   grid-auto-rows:var(--bar-h);column-gap:0;row-gap:var(--bar-gap);pointer-events:none}
+ .spanbar{font-size:10px;font-weight:600;border-radius:3px;padding:0 6px;margin:0 1px;color:#fff;
+   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+   height:var(--bar-h);line-height:var(--bar-h);box-shadow:0 1px 2px #00000040}
+ .chip{font-size:10px;font-weight:500;border-radius:3px;padding:1px 4px;margin-top:1px;
+   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:14px}
+ .chip .dot{display:inline-block;width:5px;height:5px;border-radius:50%;flex:0 0 5px;margin-right:3px;vertical-align:middle}
+ .more{font-size:9px;opacity:.4;margin-top:1px;padding-left:2px}
+
+ /* ── week view (from calendar view) ───────────────────────── */
+ .cal-week{display:flex;flex-direction:column;height:100%}
+ .cal-allday{display:grid;grid-template-columns:48px repeat(7,1fr);
+   border-bottom:1px solid #ffffff20;min-height:24px;padding-bottom:2px}
+ .cal-allday .lbl{font-size:10px;opacity:.5;padding:4px 3px;letter-spacing:.04em}
+ .cal-allday .spanbar{font-size:10px;font-weight:600;border-radius:3px;padding:0 5px;margin:2px 1px 0;
+   height:16px;line-height:16px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+   box-shadow:0 1px 2px #00000040;align-self:start}
+ .cal-hours{flex:1 1 auto;overflow:auto;display:grid;grid-template-columns:48px repeat(7,1fr);position:relative}
+ .hourlab{font-size:10px;color:#6b7280;height:40px;border-top:1px solid #ffffff10;padding:1px 4px;letter-spacing:.01em}
+ .daycol{position:relative;border-left:1px solid #ffffff10}
+ .hcell{height:40px;border-top:1px solid #ffffff10}
+ .daycol.today{background:#2563eb14;border-top:1px solid #3b82f666}
+ .tblock{position:absolute;left:2px;right:2px;border-radius:4px;color:#fff;font-size:10px;font-weight:500;
+   padding:1px 4px;overflow:hidden;box-shadow:0 1px 3px #00000050;line-height:13px;white-space:nowrap;cursor:default}
+ .cal-week-header{display:grid;grid-template-columns:48px repeat(7,1fr);flex:0 0 auto;border-bottom:1px solid #ffffff1c}
+ .cal-week-header .wh-lbl{width:48px}
+ .whdcol{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;padding:3px 4px;text-align:center}
+ .whdcol.today{color:#60a5fa;font-weight:700}
+</style></head><body>
+<!-- PREVIEW (tile / filler): clock + weather + next few events, fit-to-tile no-scroll -->
+<div id="preview">
+  <div id="pv-clock" class="clock">--:--</div>
+  <div id="pv-date" class="date"></div>
+  <div id="pv-wx" class="wx"></div>
+  <div id="pv-agenda"></div>
+</div>
+
+<!-- MAIN dashboard: instrument rail + calendar centerpiece + news band -->
+<div id="dash">
+  <aside id="rail">
+    <div id="clock" class="clock">--:--</div>
+    <div id="date" class="date"></div>
+    <div class="rule"></div>
+    <div id="wx" class="wx"></div>
+    <div id="fc" class="fc"></div>
+    <div id="rail-next"></div>
+  </aside>
+  <section id="cal">
+    <div id="cal-controls">
+      <button id="cal-prev">‹</button><button id="cal-today">Today</button>
+      <button id="cal-next">›</button><span id="cal-label"></span>
+      <button id="cal-mode">Week</button>
+    </div>
+    <div id="cal-body"></div>
+  </section>
+  <footer id="newsband"></footer>
+</div>
+
+<script>
+const ctx=new URLSearchParams(location.search).get("ctx")||"tile";
+document.body.dataset.ctx=ctx;
+const isMain=ctx==="main";
+const MS_DAY=86400000;
+// span-bar geometry (px) — single source; pushed to CSS custom props so the in-flow
+// chip spacer and the absolute span overlay stay pixel-aligned.
+const BAR_H=15, BAR_GAP=2, DATE_H=18;   // DATE_H = cell padding-top(2) + date height(16)
+const PV_MAX=3;                          // upcoming events shown in the small preview
+let EVENTS=[], NOW=new Date(), WIN0=null, WIN1=null;
+let MAXAG=5, lastWeekKey=null;
+let MODE=localStorage.getItem("dash.viewmode")||"month";
+let CUR=MODE==="week"?startOfWeek(new Date()):startOfMonth(new Date());
+
+function $(id){return document.getElementById(id);}
+function esc(s){return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function startOfMonth(d){return new Date(d.getFullYear(),d.getMonth(),1);}
+function startOfWeek(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);x.setHours(0,0,0,0);return x;}
+function sameDay(a,b){return a.getFullYear()==b.getFullYear()&&a.getMonth()==b.getMonth()&&a.getDate()==b.getDate();}
+// LOCAL calendar-day index (wall-clock, tz-corrected) so all-day (local-midnight) and
+// timed events on the same local date bucket identically and align with the grid.
+function dnum(d){return Math.floor((d.getTime()-d.getTimezoneOffset()*60000)/MS_DAY);}
+function fmtTime(e){if(e.allday)return"all day";return new Date(e.start).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",hour12:false});}
+function showErr(msg){const t=isMain?$("cal-body"):$("pv-agenda");
+  if(t) t.innerHTML='<div class="err">'+esc(msg)+'</div>';}
+
+// ── live clock ─────────────────────────────────────────────
+function tick(){const n=new Date();
+  const t=n.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false});
+  const d=n.toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"});
+  if(isMain){$("clock").textContent=t;$("date").textContent=d;}
+  else{$("pv-clock").textContent=t;$("pv-date").textContent=d;}}
+tick(); setInterval(tick,1000);
+
+// ── weather ────────────────────────────────────────────────
+function renderWx(w){
+  if(isMain){
+    const wx=$("wx"), fc=$("fc");
+    if(!w){wx.style.display="none";fc.innerHTML="";return;}
+    wx.style.display="";
+    wx.innerHTML='<span class="wx-emoji">'+esc(w.emoji)+'</span> '+w.temp+esc(w.units)+' '+esc(w.location_name)+
+      ' <span class="wx-hilo">↑'+w.today.hi+"° ↓"+w.today.lo+"°</span>";
+    fc.innerHTML='<div class="fc-head">5-day</div>'+(w.forecast||[]).map(f=>
+      '<div class="fc-item"><span class="fc-day">'+esc(f.day)+'</span>'+
+      '<span class="fc-ico">'+esc(f.emoji)+'</span>'+
+      '<span class="fc-temps"><span class="fc-hi">'+f.hi+'°</span><span class="fc-lo">'+f.lo+'°</span></span></div>').join("");
+  } else {
+    const wx=$("pv-wx");
+    if(!w){wx.style.display="none";return;}
+    wx.style.display="";
+    wx.innerHTML='<span class="wx-emoji">'+esc(w.emoji)+'</span> '+w.temp+esc(w.units)+' '+esc(w.location_name);
+  }
+}
+
+// ── news (main only) ───────────────────────────────────────
+function renderNews(items){
+  if(!isMain)return;
+  const el=$("newsband");
+  if(!items||!items.length){el.innerHTML='<span class="news-eyebrow">News</span><span class="empty">No news</span>';return;}
+  const itemsHtml=items.map(i=>
+    '<span class="ni">'+esc(i.title)+' <span class="src">('+esc(i.source)+')</span></span>').join("");
+  // duplicate the headlines so the -50% translate loops with no visible seam
+  el.innerHTML='<span class="news-eyebrow">News</span><div class="news-vp">'+
+    '<div class="news-track" id="news-track">'+itemsHtml+itemsHtml+'</div></div>';
+  const track=$("news-track");
+  const oneWidth=track.scrollWidth/2;      // content is duplicated → half the track is one loop
+  const PPS=40;                            // ~40 px/s → slow TV-news crawl
+  if(oneWidth>0) track.style.animationDuration=(oneWidth/PPS)+"s";
+}
+
+// ── preview upcoming agenda ────────────────────────────────
+function renderPvAgenda(){
+  if(isMain)return;
+  const el=$("pv-agenda");
+  const up=EVENTS.filter(e=>new Date(e.end||e.start)>=NOW).slice(0,PV_MAX);
+  if(!up.length){el.innerHTML='<div class="empty">No upcoming events</div>';return;}
+  el.innerHTML=up.map(e=>{
+    const dk=new Date(e.start).toLocaleDateString([], {weekday:"short",day:"numeric",month:"short"});
+    return '<div class="pv-ev"><span class="dot" style="background:'+esc(e.color)+'"></span>'+
+      '<span class="when">'+dk+' '+fmtTime(e)+'</span><span class="title">'+esc(e.title)+'</span></div>';
+  }).join("");
+}
+
+// ── calendar span helpers ──────────────────────────────────
+function splitSpanByWeek(startIdx,endIdxExcl,weekStartIdx){
+  const out=[]; let s=startIdx;
+  while(s<endIdxExcl){
+    const row=Math.floor((s-weekStartIdx)/7);
+    const weekEnd=weekStartIdx+(row+1)*7;
+    const segEnd=Math.min(endIdxExcl,weekEnd);
+    out.push({row, col0:(s-weekStartIdx)-row*7, col1:(segEnd-1-weekStartIdx)-row*7});
+    s=segEnd;
+  }
+  return out;
+}
+function assignLanes(items){
+  const lanes=[]; const res=new Array(items.length);
+  const order=items.map((it,i)=>i).sort((a,b)=>items[a].s-items[b].s||items[a].e-items[b].e);
+  for(const i of order){
+    let placed=-1;
+    for(let L=0;L<lanes.length;L++){ if(lanes[L]<=items[i].s){placed=L;break;} }
+    if(placed<0){placed=lanes.length;lanes.push(0);}
+    lanes[placed]=items[i].e; res[i]=placed;
+  }
+  return res;
+}
+
+// ── data + render dispatch ─────────────────────────────────
+async function load(){
+  try{
+    const d=await (await fetch("/plugin/dashboard/data")).json();
+    if(d.error){showErr(d.error);renderWx(null);renderNews([]);return;}
+    EVENTS=(d.events||[]).filter(e=>e&&e.start);
+    MAXAG=d.max_events||5;
+    if(EVENTS.length){WIN0=new Date(EVENTS[0].start);WIN1=new Date(EVENTS[EVENTS.length-1].start);}
+    renderWx(d.weather||null);
+    renderNews(d.news||[]);
+    render();
+  }catch(e){renderWx(null);renderNews([]);showErr("dashboard offline");}
+}
+function render(){
+  NOW=new Date();
+  if(!isMain){renderPvAgenda();return;}
+  renderRailNext();
+  $("cal-mode").textContent = MODE==="month"?"Week":"Month";
+  if(MODE==="month") renderMonth(); else renderWeek();
+}
+
+// "up next" — the nearest upcoming events, filling the rail below the forecast
+function renderRailNext(){
+  const el=$("rail-next"); if(!el)return;
+  const up=EVENTS.filter(e=>new Date(e.end||e.start)>=NOW).slice(0,6);
+  if(!up.length){el.innerHTML="";return;}
+  el.innerHTML='<div class="rn-head">Up next</div>'+up.map(e=>{
+    const dk=new Date(e.start).toLocaleDateString([], {weekday:"short",day:"numeric"});
+    return '<div class="rn-ev"><span class="rn-dot" style="background:'+esc(e.color)+'"></span>'+
+      '<span class="rn-when">'+dk+(e.allday?"":" "+fmtTime(e))+'</span>'+
+      '<span class="rn-title">'+esc(e.title)+'</span></div>';
+  }).join("");
+}
+
+function renderMonth(){
+  const body=$("cal-body");
+  const first=startOfMonth(CUR), gridStart=startOfWeek(first);
+  const weekStartIdx=dnum(gridStart), gridEndIdx=weekStartIdx+42;
+  $("cal-label").textContent=CUR.toLocaleDateString([], {month:"long",year:"numeric"});
+  const dows=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+  const spans=EVENTS.filter(e=>e.allday || (dnum(new Date(e.end||e.start))>dnum(new Date(e.start))))
+    .map(e=>{const s=dnum(new Date(e.start));
+            let eend=dnum(new Date(e.end||e.start));
+            if(e.allday) eend=Math.max(eend,s+1); else eend+=1;
+            return {e,s,eExcl:eend};})
+    .filter(x=>x.eExcl>weekStartIdx && x.s<gridEndIdx);
+  const laneOf=assignLanes(spans.map(x=>({s:Math.max(x.s,weekStartIdx),e:Math.min(x.eExcl,gridEndIdx)})));
+  const weekSegs=[[],[],[],[],[],[]];
+  spans.forEach((x,i)=>{
+    const cs=Math.max(x.s,weekStartIdx), ce=Math.min(x.eExcl,gridEndIdx);
+    for(const seg of splitSpanByWeek(cs,ce,weekStartIdx)) weekSegs[seg.row].push({...seg,lane:laneOf[i],e:x.e});
+  });
+  const weekMaxLane=weekSegs.map(segs=>segs.reduce((m,s)=>Math.max(m,s.lane),-1));
+
+  const byCell={};
+  EVENTS.filter(e=>!e.allday && dnum(new Date(e.end||e.start))===dnum(new Date(e.start))).forEach(e=>{
+    const idx=dnum(new Date(e.start))-weekStartIdx; if(idx<0||idx>=42)return;
+    (byCell[idx]=byCell[idx]||[]).push(e);
+  });
+
+  const month=document.createElement("div"); month.className="cal-month";
+  month.style.setProperty("--bar-h",BAR_H+"px");
+  month.style.setProperty("--bar-gap",BAR_GAP+"px");
+  month.style.setProperty("--date-h",DATE_H+"px");
+  const dowRow=document.createElement("div"); dowRow.className="cal-dowrow";
+  dows.forEach(n=>{const c=document.createElement("div");c.className="cal-dow";c.textContent=n;dowRow.appendChild(c);});
+  month.appendChild(dowRow);
+
+  for(let w=0;w<6;w++){
+    const row=document.createElement("div"); row.className="cal-weekrow";
+    const reservedH=(weekMaxLane[w]+1)*(BAR_H+BAR_GAP);
+    for(let c=0;c<7;c++){
+      const idx=w*7+c, d=new Date(gridStart.getFullYear(),gridStart.getMonth(),gridStart.getDate()+idx);
+      const cell=document.createElement("div");
+      cell.className="cal-cell"+(d.getMonth()!=CUR.getMonth()?" dim":"")+(sameDay(d,NOW)?" today":"");
+      cell.dataset.idx=idx;
+      const dn=document.createElement("div"); dn.className="cal-date"; dn.textContent=d.getDate(); cell.appendChild(dn);
+      if(reservedH>0){const sp=document.createElement("div"); sp.className="cal-spanspace"; sp.style.height=reservedH+"px"; cell.appendChild(sp);}
+      const list=byCell[idx];
+      if(list){
+        list.slice(0,3).forEach(e=>{const ch=document.createElement("div"); ch.className="chip";
+          ch.style.background=e.color+"33";
+          ch.innerHTML='<span class="dot" style="background:'+esc(e.color)+'"></span> '+fmtTime(e)+' '+esc(e.title);
+          cell.appendChild(ch);});
+        if(list.length>3){const m=document.createElement("div"); m.className="more"; m.textContent="+"+(list.length-3)+" more"; cell.appendChild(m);}
+      }
+      row.appendChild(cell);
+    }
+    if(weekSegs[w].length){
+      const layer=document.createElement("div"); layer.className="cal-spanlayer";
+      weekSegs[w].forEach(s=>{const bar=document.createElement("div"); bar.className="spanbar";
+        bar.style.background=s.e.color;
+        bar.style.gridColumn=(s.col0+1)+" / "+(s.col1+2);
+        bar.style.gridRow=(s.lane+1);
+        bar.textContent=s.e.title;
+        layer.appendChild(bar);});
+      row.appendChild(layer);
+    }
+    month.appendChild(row);
+  }
+  body.replaceChildren(month);
+  updateNavBounds();
+}
+
+function renderWeek(){
+  const body=$("cal-body");
+  const prevHrs=body.querySelector(".cal-hours"), prevScroll=prevHrs?prevHrs.scrollTop:null;
+  const ws=startOfWeek(CUR), wsIdx=dnum(ws);
+  const days=[...Array(7)].map((_,i)=>new Date(ws.getTime()+i*MS_DAY));
+  $("cal-label").textContent=
+    days[0].toLocaleDateString([], {day:"numeric",month:"short"})+" – "+
+    days[6].toLocaleDateString([], {day:"numeric",month:"short"});
+  const HOUR=40;
+  const dows=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+  let html='<div class="cal-week">';
+  html+='<div class="cal-week-header"><div class="wh-lbl"></div>';
+  for(let i=0;i<7;i++){
+    const tcls=sameDay(days[i],NOW)?" today":"";
+    html+='<div class="whdcol'+tcls+'">'+dows[i]+' '+days[i].getDate()+'</div>';
+  }
+  html+='</div>';
+  html+='<div class="cal-allday"><div class="lbl">all-day</div>';
+  html+='</div>';
+  html+='<div class="cal-hours"><div>';
+  for(let h=0;h<24;h++) html+='<div class="hourlab">'+String(h).padStart(2,"0")+':00</div>';
+  html+='</div>';
+  for(let i=0;i<7;i++){
+    const tcls=sameDay(days[i],NOW)?" today":"";
+    html+='<div class="daycol'+tcls+'" data-d="'+i+'">';
+    for(let h=0;h<24;h++) html+='<div class="hcell"></div>';
+    html+='</div>';
+  }
+  html+='</div></div>';
+  body.innerHTML=html;
+
+  const adRow=body.querySelector(".cal-allday");
+  EVENTS.filter(e=>e.allday).forEach(e=>{
+    const s=dnum(new Date(e.start)), eExcl=Math.max(dnum(new Date(e.end||e.start)),s+1);
+    const c0=Math.max(s,wsIdx)-wsIdx, c1=Math.min(eExcl,wsIdx+7)-1-wsIdx;
+    if(c1<c0||c1<0||c0>6) return;
+    const bar=document.createElement("div"); bar.className="spanbar";
+    bar.style.background=e.color;
+    bar.style.gridColumn=(c0+2)+" / "+(c1+3);
+    bar.textContent=e.title;
+    adRow.appendChild(bar);
+  });
+
+  const cols=[...body.querySelectorAll(".cal-hours .daycol")];
+  EVENTS.filter(e=>!e.allday).forEach(e=>{
+    const st=new Date(e.start);
+    const di=dnum(st)-wsIdx;
+    if(di<0||di>6) return;
+    const en=new Date(e.end||e.start);
+    const top=(st.getHours()+st.getMinutes()/60)*HOUR;
+    const mins=Math.max(20,(en-st)/60000);
+    const hgt=Math.max(14,(mins/60)*HOUR);
+    const b=document.createElement("div"); b.className="tblock";
+    b.style.top=top+"px"; b.style.height=hgt+"px";
+    b.style.background=e.color;
+    b.textContent=fmtTime(e)+" "+e.title;
+    cols[di].appendChild(b);
+  });
+
+  updateNavBounds();
+  const hrs=body.querySelector(".cal-hours");
+  if(hrs) hrs.scrollTop=(wsIdx===lastWeekKey && prevScroll!=null) ? prevScroll : 7*HOUR;
+  lastWeekKey=wsIdx;
+}
+
+function updateNavBounds(){
+  const prev=$("cal-prev"), next=$("cal-next");
+  if(!WIN0||!WIN1){prev.disabled=next.disabled=false;return;}
+  const step=(MODE==="month")?{m:1}:{d:7};
+  prev.disabled = stepDate(CUR,-1,step) < startOfMonth(WIN0);
+  next.disabled = stepDate(CUR, 1,step) > WIN1;
+}
+function stepDate(base,dir,step){const d=new Date(base);
+  if(step.m)d.setMonth(d.getMonth()+dir*step.m); else d.setDate(d.getDate()+dir*step.d); return d;}
+
+if(isMain){
+  $("cal-prev").onclick=()=>{CUR=stepDate(CUR,-1,MODE==="month"?{m:1}:{d:7});render();};
+  $("cal-next").onclick=()=>{CUR=stepDate(CUR, 1,MODE==="month"?{m:1}:{d:7});render();};
+  $("cal-today").onclick=()=>{CUR=MODE==="month"?startOfMonth(new Date()):startOfWeek(new Date());render();};
+  $("cal-mode").onclick=()=>{MODE=MODE==="month"?"week":"month";localStorage.setItem("dash.viewmode",MODE);
+    CUR=MODE==="month"?startOfMonth(CUR):startOfWeek(CUR);render();};
+}
+
+load(); setInterval(load,5*60*1000);
+</script></body></html>

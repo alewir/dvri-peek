@@ -1,5 +1,0 @@
-id: calendar
-name: "Calendar"
-refresh_seconds: 1800
-contexts: [tile, main, filler]
-config: [sources, lookback_days, lookahead_days, max_events_grid, max_events]

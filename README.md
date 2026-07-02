@@ -95,7 +95,7 @@ Previews always run on low-res sub-streams; the selected (big-pane) lens auto-up
 to main/HD — no stream-tier flag to set.
 
 > **LAN-open by design:** the player binds `0.0.0.0` with **no authentication**, so anyone
-> on your LAN can view the dashboard and reach `/plugin/calendar/data`, which serves your
+> on your LAN can view the dashboard and reach `/plugin/dashboard/data`, which serves your
 > calendar event titles/times as JSON. Keep it on a trusted network (or front it with a
 > reverse proxy + auth) if that data is sensitive.
 
@@ -118,14 +118,10 @@ Each plugin lives in its own subdirectory under `plugins/`:
 
 ```
 plugins/
-  clock/
+  dashboard/
     manifest.yaml   # required
     view.html       # required — rendered in an iframe
     backend.py      # optional — server-side data fetch
-  calendar/
-    manifest.yaml
-    view.html
-    backend.py
 ```
 
 ### `manifest.yaml` keys
@@ -163,33 +159,34 @@ goes in the **git-ignored** `secrets.local.yaml`:
 ```yaml
 # secrets.local.yaml  (git-ignored — never commit this file)
 plugins:
-  calendar:
-    lookback_days: 90        # how far back the fetched window starts
-    lookahead_days: 365      # how far ahead it reaches (big-view browsing is bounded to this window)
-    max_events_grid: 2000    # safety cap on total expanded events in the dataset
-    max_events: 5            # small-view agenda slice (next N upcoming); default 5 keeps it no-scroll in the tile
-    sources:
-      - name: "Personal"
-        color: "#4285f4"     # source color for chips/bars/dots
-        ics_url: "https://example.com/your-calendar.ics"   # <-- replace with real URL
-      # - name: "Work"
-      #   color: "#0b8043"
-      #   ics_url: "https://example.com/work.ics"
-  clock:
+  dashboard:                   # combined clock + weather + news + calendar
     location: "Warsaw"         # city or "lat,lon" — drives weather (Open-Meteo, no key) + local-news query
     news_locale: "pl-PL"       # lang-region for the derived local-news feed
     news_feeds:                # explicit RSS feeds, merged with the derived local feed
       - "https://news.google.com/rss/search?q=US%20stock%20market&hl=en-US&gl=US&ceid=US:en"
       - "https://news.google.com/rss/search?q=GPW%20gie%C5%82da&hl=pl&gl=PL&ceid=PL:pl"
     max_news: 10
+    lookback_days: 90          # how far back the fetched calendar window starts
+    lookahead_days: 365        # how far ahead it reaches (big-view browsing is bounded to this window)
+    max_events_grid: 2000      # safety cap on total expanded events in the dataset
+    max_events: 5              # preview agenda slice (next N upcoming)
+    sources:                   # multiple ICS calendars merged into ONE colour-coded view
+      - name: "Personal"
+        color: "#4285f4"       # source color for chips/bars/dots
+        ics_url: "https://example.com/your-calendar.ics"   # <-- replace with real URL
+      - name: "Work"           # add as many calendars as you like — each its own secret ICS URL
+        color: "#0b8043"
+        ics_url: "https://example.com/work.ics"
 ```
 
-The calendar's **big view** (when assigned to the main/spotlight pane) is a browsable
-**Month** grid (multi-day events render as spanning bars) and an hourly **Week** grid —
-toggle Month/Week, page with ‹ Prev / Today / Next ›. The **small view** (thumbnail/filler)
-stays a compact agenda of the next `max_events`. Multiple `sources` are merged + colour-coded;
-recurring events are expanded in-window (DAILY/WEEKLY incl. `BYDAY`/`COUNT`/`UNTIL`), honouring
-**EXDATE** (cancelled instances) and **RECURRENCE-ID** (rescheduled instances).
+The dashboard's **big view** (assigned to the main/spotlight pane) is a full panel: an
+instrument rail (live clock, current weather, 5-day forecast, an "up next" agenda), a
+browsable calendar centerpiece — a **Month** grid (multi-day events render as spanning bars)
+and an hourly **Week** grid (toggle Month/Week, page with ‹ Prev / Today / Next ›) — and a
+slow **news crawl** across the bottom. The **preview** (thumbnail/filler) is a compact clock +
+weather + next few events. Multiple `sources` are merged into one view + colour-coded per
+calendar; recurring events are expanded in-window (DAILY/WEEKLY incl. `BYDAY`/`COUNT`/`UNTIL`),
+honouring **EXDATE** (cancelled instances) and **RECURRENCE-ID** (rescheduled instances).
 
 ### Tile and filler assignment
 
@@ -201,8 +198,7 @@ the git-ignored `state.local.json`.
 
 | Plugin | id | Description |
 |--------|----|-------------|
-| Clock | `clock` | Live clock; **big view** adds current weather + 3-day forecast (Open-Meteo, no key) and an aggregated stock/local **news** feed; small view = clock + compact weather |
-| Calendar | `calendar` | Multi-source ICS calendar merged into a day view |
+| Clock & Calendar | `dashboard` | Combined widget. **Big view:** instrument rail (live clock, weather + 5-day forecast via Open-Meteo, no key, + "up next"), a browsable Month/Week **calendar** (multiple ICS `sources` merged + colour-coded), and a slow **news crawl** (aggregated stock/local feeds). **Preview:** clock + compact weather + next few events |
 
 ### Dev workflow
 

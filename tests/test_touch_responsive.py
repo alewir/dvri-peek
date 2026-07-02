@@ -110,12 +110,12 @@ def test_revealbar_taller_touch_target_with_accent(tmp_path, monkeypatch):
 # --- Fix 3: small agenda fits the tile (no scrollbar vs clickcatch) ---
 
 def test_small_agenda_overflow_hidden_and_fixed_count():
-    h = (ROOT / "plugins" / "calendar" / "view.html").read_text()
+    h = (ROOT / "plugins" / "dashboard" / "view.html").read_text()
     compact = h.replace(' ', '').replace('\n', '')
-    # the small preview agenda no longer scrolls (clickcatch owns the whole tile)
-    assert '.agenda{height:100%;overflow:hidden' in compact
-    assert '.agenda{height:100%;overflow:auto' not in compact
-    # renderAgenda shows a backend-driven few upcoming items that fit the tile;
-    # default 5 (when max_events is unset) preserves the no-scroll fit-to-tile behavior
-    assert 'const max=MAXAG,' in h
-    assert 'MAXAG=d.max_events||5' in h
+    # the small preview no longer scrolls (clickcatch owns the whole tile gesture)
+    pv = compact[compact.index('#preview{'):compact.index('}', compact.index('#preview{'))]
+    assert 'overflow:hidden' in pv and 'overflow:auto' not in pv
+    pa = compact[compact.index('#pv-agenda{'):compact.index('}', compact.index('#pv-agenda{'))]
+    assert 'overflow:hidden' in pa
+    # a fixed few upcoming items that fit the tile (no scroll) — PV_MAX, not backend-driven
+    assert 'const PV_MAX=3' in h and 'slice(0,PV_MAX)' in h

@@ -22,7 +22,8 @@ echo ">> installing apt dependencies..."
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   python3-opencv python3-flask python3-numpy python3-yaml \
-  chromium curl git
+  chromium curl git \
+  fonts-noto-color-emoji     # weather + UI emoji glyphs (else they render as tofu boxes)
 
 # --- 2) go2rtc binary for this CPU architecture ------------------------------
 if [ ! -x "$DIR/go2rtc" ]; then

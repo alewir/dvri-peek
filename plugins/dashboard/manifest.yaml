@@ -1,0 +1,14 @@
+id: dashboard
+name: "Clock & Calendar"
+refresh_seconds: 900        # weather + news + calendar cache TTL (the clock itself is live frontend)
+contexts: [tile, main, filler]
+# config (in secrets.local.yaml -> plugins.dashboard):
+#   location: "Warsaw"        city or "lat,lon" — weather + derived local-news query
+#   news_locale: "pl-PL"      lang-region for the derived local-news feed
+#   news_feeds: [ <rss urls> ] merged with the derived local feed
+#   max_news: 10              news items to show (main view)
+#   sources: [{name,color,ics_url}]  secret ICS calendars, merged + color-coded
+#   lookback_days / lookahead_days   fetched grid window (default 90 / 365)
+#   max_events_grid                  hard cap on expanded occurrences (default 2000)
+#   max_events                       upcoming items in the compact preview (default 5)
+config: [location, news_locale, news_feeds, max_news, sources, lookback_days, lookahead_days, max_events_grid, max_events]

@@ -112,11 +112,17 @@ before innerHTML; `textContent` paths are never `esc()`-ed.
 
 - Autodiscovered from `plugins/<id>/` (`manifest.yaml` + `view.html` + optional `backend.py`).
 - Rendered in a sandboxed iframe at `/plugin/<id>/view?ctx=tile|main|filler`; the view adapts
-  (e.g. calendar: small ctx = agenda, main ctx = month/week grid).
+  (preview ctx = compact, main ctx = full panel).
 - `backend.fetch(config)` → JSON at `/plugin/<id>/data`, cached per `refresh_seconds`; `config`
   is the plugin's block from `secrets.local.yaml`.
-- Calendar backend: stdlib ICS parse + recurrence expansion (DAILY/WEEKLY incl. BYDAY/COUNT/UNTIL,
-  EXDATE, RECURRENCE-ID), TZID→UTC, multi-source merge, broad cached window.
+- Bundled `dashboard` plugin (combined clock + weather + news + calendar), stdlib only:
+  - Weather: Open-Meteo geocode + forecast (WMO→emoji, °C, 5-day), no API key.
+  - News: RSS via `xml.etree` — a derived local feed + explicit feeds, merged/sorted/capped,
+    per-source error isolation; view crawls it as a slow marquee.
+  - Calendar: ICS parse + recurrence expansion (DAILY/WEEKLY incl. BYDAY/COUNT/UNTIL, EXDATE,
+    RECURRENCE-ID), TZID→UTC, **multiple `sources` merged into one colour-coded view**, broad
+    cached window. Big view = instrument rail + browsable Month/Week grid + news crawl; preview =
+    clock + compact weather + next few events. All fetches bounded (`_MAX_BYTES`), errors isolated.
 
 ## 8. Deployment (Pi kiosk)
 
