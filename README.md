@@ -112,6 +112,10 @@ A `grid` device may add `grid_tier: main` to render its cells in full resolution
 HD. Default is `sub`. (`spotlight` previews always use sub; the big pane upgrades
 to HD on selection.)
 
+Streams taller than `display_max_height` (player default 1080, per-device override)
+are downscaled before encode — a 1080p wall can't resolve a 2K grid cell, and it
+cuts CPU + latency. `/status` still shows the native resolution.
+
 ## Plugins
 
 dvri-peek supports **dashboard tile plugins** — iframe-embedded widgets that sit

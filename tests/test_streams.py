@@ -66,7 +66,7 @@ def _boot_no_workers(tmp_path, monkeypatch):
 def test_api_streams_starts_and_stops_main(tmp_path, monkeypatch):
     player = _boot_no_workers(tmp_path, monkeypatch)
     class Fake:
-        def __init__(s, lid, *a): s.id = lid; s.tier = "sub"; s.started = False; s.stopped = False; s.ready = False
+        def __init__(s, lid, *a, **k): s.id = lid; s.tier = "sub"; s.started = False; s.stopped = False; s.ready = False
         def start(s): s.started = True
         def stop(s): s.stopped = True
     monkeypatch.setattr(player, "LensWorker", Fake)
@@ -86,7 +86,7 @@ def test_api_streams_switches_main_between_lenses(tmp_path, monkeypatch):
     # switching the selected lens must start the new main AND stop the old one in one request
     player = _boot_no_workers(tmp_path, monkeypatch)
     class Fake:
-        def __init__(s, lid, *a): s.id = lid; s.tier = "sub"; s.started = False; s.stopped = False; s.ready = False
+        def __init__(s, lid, *a, **k): s.id = lid; s.tier = "sub"; s.started = False; s.stopped = False; s.ready = False
         def start(s): s.started = True
         def stop(s): s.stopped = True
     monkeypatch.setattr(player, "LensWorker", Fake)
@@ -148,7 +148,7 @@ def test_grid_tier_main_makes_base_workers_hd(tmp_path, monkeypatch):
     importlib.reload(player)
     created = {}
     class Fake:
-        def __init__(s, lid, name, gw, q, fps, tier): s.id = lid; s.tier = tier; created[lid] = tier
+        def __init__(s, lid, name, gw, q, fps, tier, max_height=None): s.id = lid; s.tier = tier; created[lid] = tier
         def start(s): pass
     monkeypatch.setattr(player, "LensWorker", Fake)
     player.bootstrap(config_path="cameras.yaml", start_workers=True, start_gateway=False,
@@ -167,7 +167,7 @@ def test_api_streams_skips_base_hd_lens(tmp_path, monkeypatch):
         def __init__(s, lid, tier="sub"): s.id = lid; s.tier = tier; s.started = False; s.stopped = False; s.ready = False
         def start(s): s.started = True
         def stop(s): s.stopped = True
-    monkeypatch.setattr(player, "LensWorker", lambda lid, *a: Fake(lid))
+    monkeypatch.setattr(player, "LensWorker", lambda lid, *a, **k: Fake(lid))
     player.WORKERS.clear(); player.MAIN_WORKERS.clear()
     player.WORKERS["lens1"] = Fake("lens1", "main"); player.WORKERS["lens2"] = Fake("lens2", "sub")
     player.LENS_META.update({"lens1": {"name": "L1"}, "lens2": {"name": "L2"}})
@@ -188,3 +188,19 @@ def test_lensworker_tier_url_and_ready():
     sub = player.LensWorker("lens1", "L1", gw, 75, 15, "sub")
     assert sub.tier == "sub" and sub.url().endswith("/lens1")
     assert not hasattr(sub, "set_stream")   # mode-switching removed
+
+
+def test_fit_height_downscales_tall_frame():
+    import numpy as np, player
+    out = player._fit_height(np.zeros((1440, 2560, 3), dtype=np.uint8), 1080)
+    assert out.shape[0] == 1080 and out.shape[1] == 1920   # 16:9 aspect kept
+
+def test_fit_height_leaves_small_frame_untouched():
+    import numpy as np, player
+    f = np.zeros((360, 640, 3), dtype=np.uint8)
+    assert player._fit_height(f, 1080).shape == (360, 640, 3)   # already fits
+
+def test_fit_height_none_is_noop():
+    import numpy as np, player
+    f = np.zeros((1440, 2560, 3), dtype=np.uint8)
+    assert player._fit_height(f, None).shape == (1440, 2560, 3)

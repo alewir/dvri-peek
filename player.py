@@ -127,8 +127,21 @@ def stop_go2rtc():
 # --------------------------------------------------------------------------- #
 #  Per-lens grabber (reads go2rtc's RTSP restream)
 # --------------------------------------------------------------------------- #
+def _fit_height(frame, max_h):
+    """Downscale `frame` to at most `max_h` px tall, preserving aspect. No-op when
+    `max_h` is falsy or the frame already fits. Cuts JPEG-encode + browser-decode cost
+    for oversized streams (e.g. a 2560x1440 NVR channel) with no visible loss on a 1080p wall."""
+    if not max_h:
+        return frame
+    h, w = frame.shape[:2]
+    if h <= max_h:
+        return frame
+    nw = max(1, int(round(w * max_h / h)))
+    return cv2.resize(frame, (nw, max_h), interpolation=cv2.INTER_AREA)
+
+
 class LensWorker(threading.Thread):
-    def __init__(self, lens_id, name, gw, jpeg_quality, target_fps, tier):
+    def __init__(self, lens_id, name, gw, jpeg_quality, target_fps, tier, max_height=None):
         super().__init__(daemon=True)
         self.id = lens_id
         self.name = name
@@ -137,6 +150,7 @@ class LensWorker(threading.Thread):
         self.jpeg_quality = jpeg_quality
         self.min_period = 1.0 / max(target_fps, 1)
         self.tier = tier                 # "sub" | "main" — fixed for this worker's life
+        self.max_height = max_height     # downscale cap for the encoded frame (None = native)
         self._lock = threading.Lock()
         self._jpeg = None
         self._stop = threading.Event()
@@ -211,7 +225,7 @@ class LensWorker(threading.Thread):
                 h, w = frame.shape[:2]
                 self.resolution = f"{w}x{h}"
                 self.status = f"online ({self.tier})"
-                ok2, buf = cv2.imencode(".jpg", frame, enc)
+                ok2, buf = cv2.imencode(".jpg", _fit_height(frame, self.max_height), enc)
                 if ok2:
                     with self._lock:
                         self._jpeg = buf.tobytes()
@@ -242,7 +256,8 @@ def _start_main_worker(lid):
             return
         pl = CFG.get("player", {}); gw = CFG.get("gateway", {})
         w = LensWorker(lid, LENS_META[lid]["name"], gw,
-                       pl.get("jpeg_quality", 75), pl.get("target_fps", 15), "main")
+                       pl.get("jpeg_quality", 75), pl.get("target_fps", 15), "main",
+                       max_height=LENS_META[lid].get("max_height"))
         MAIN_WORKERS[lid] = w
     w.start()
 
@@ -781,21 +796,24 @@ def bootstrap(config_path=None, start_workers=True, start_gateway=True,
     else:
         lens_index = {ln["id"]: {"name": ln.get("name", ln["id"])}
                       for dev in DEVICES for ln in dev["lenses"]}
+    # per-lens base tier + display-height cap, from device / player config
+    default_max = pl.get("display_max_height", 1080)
+    lens_tier, lens_max = {}, {}
+    for dev in DEVICES:
+        base = "main" if (dev.get("layout") == "grid" and dev.get("grid_tier") == "main") else "sub"
+        dmax = dev.get("display_max_height", default_max)
+        mh = dmax if isinstance(dmax, int) and dmax > 0 else None
+        for ln in dev["lenses"]:
+            lens_tier[ln["id"]] = base
+            lens_max[ln["id"]] = mh
     for lid, meta in lens_index.items():
-        LENS_META[lid] = {"name": meta["name"]}
+        LENS_META[lid] = {"name": meta["name"], "max_height": lens_max.get(lid)}
     if start_workers:
         gw = CFG.get("gateway", {})
-        # Base worker tier per lens: HD (main) for grid devices flagged `grid_tier: main`
-        # (e.g. an NVR that should render its channels in full resolution), sub otherwise.
-        # Spotlight previews stay sub — their big pane upgrades to main on-demand.
-        lens_tier = {}
-        for dev in DEVICES:
-            base = "main" if (dev.get("layout") == "grid" and dev.get("grid_tier") == "main") else "sub"
-            for ln in dev["lenses"]:
-                lens_tier[ln["id"]] = base
         for lid, meta in lens_index.items():
-            w = LensWorker(lid, meta["name"], gw, pl.get("jpeg_quality", 75),
-                           pl.get("target_fps", 15), lens_tier.get(lid, "sub"))
+            w = LensWorker(lid, LENS_META[lid]["name"], gw, pl.get("jpeg_quality", 75),
+                           pl.get("target_fps", 15), lens_tier.get(lid, "sub"),
+                           max_height=LENS_META[lid]["max_height"])
             WORKERS[lid] = w
             w.start()
 
