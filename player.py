@@ -816,7 +816,7 @@ def bootstrap(config_path=None, start_workers=True, start_gateway=True,
     for dev in DEVICES:
         base = "main" if (dev.get("layout") == "grid" and dev.get("grid_tier") == "main") else "sub"
         dmax = dev.get("display_max_height", default_max)
-        mh = dmax if isinstance(dmax, int) and dmax > 0 else None
+        mh = dmax if isinstance(dmax, int) and not isinstance(dmax, bool) and dmax > 0 else None
         for ln in dev["lenses"]:
             lens_tier[ln["id"]] = base
             lens_max[ln["id"]] = mh

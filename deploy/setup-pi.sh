@@ -102,8 +102,8 @@ ROOT_SRC="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
 case "$ROOT_SRC" in
   /dev/sd*)
     if [ -f "$CMDLINE" ] && ! grep -q "usb-storage.quirks=" "$CMDLINE"; then
-      VID="$(udevadm info -q property -n "$ROOT_SRC" 2>/dev/null | sed -n 's/^ID_VENDOR_ID=//p')"
-      PID="$(udevadm info -q property -n "$ROOT_SRC" 2>/dev/null | sed -n 's/^ID_MODEL_ID=//p')"
+      VID="$(udevadm info -q property -n "$ROOT_SRC" 2>/dev/null | sed -n 's/^ID_VENDOR_ID=//p')" || true
+      PID="$(udevadm info -q property -n "$ROOT_SRC" 2>/dev/null | sed -n 's/^ID_MODEL_ID=//p')" || true
       if [ -n "$VID" ] && [ -n "$PID" ]; then
         sudo sed -i "1 s|\$| usb-storage.quirks=${VID}:${PID}:u|" "$CMDLINE"
         echo ">> disabled UAS for USB root adapter ${VID}:${PID} (reboot to apply)"
