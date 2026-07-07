@@ -204,3 +204,26 @@ def test_fit_height_none_is_noop():
     import numpy as np, player
     f = np.zeros((1440, 2560, 3), dtype=np.uint8)
     assert player._fit_height(f, None).shape == (1440, 2560, 3)
+
+def test_next_jpeg_wakes_on_publish():
+    import player, threading, time
+    w = player.LensWorker("l", "L", {}, 75, 15, "sub")
+    w._publish(b"A")
+    start = w._seq
+    got = {}
+    def waiter():
+        got["jpg"], got["seq"] = w.next_jpeg(start, timeout=5.0)
+    t = threading.Thread(target=waiter); t.start()
+    time.sleep(0.1)          # let the waiter block in wait()
+    w._publish(b"B")         # event → must wake well before the 5s timeout
+    t.join(2.0)
+    assert not t.is_alive()  # returned on the event, not the timeout
+    assert got["jpg"] == b"B" and got["seq"] == start + 1
+
+def test_next_jpeg_timeout_resends_last():
+    import player
+    w = player.LensWorker("l", "L", {}, 75, 15, "sub")
+    w._publish(b"LAST")
+    s = w._seq
+    jpg, seq = w.next_jpeg(s, timeout=0.15)   # no new frame → times out
+    assert jpg == b"LAST" and seq == s          # resends the held frame

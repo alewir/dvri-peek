@@ -152,7 +152,9 @@ class LensWorker(threading.Thread):
         self.tier = tier                 # "sub" | "main" — fixed for this worker's life
         self.max_height = max_height     # downscale cap for the encoded frame (None = native)
         self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)   # signals a newly published frame
         self._jpeg = None
+        self._seq = 0                                   # bumps on every published frame
         self._stop = threading.Event()
         self.ready = False               # True once >=1 real frame decoded
         self.status = "connecting"
@@ -174,14 +176,27 @@ class LensWorker(threading.Thread):
         with self._lock:
             return self._jpeg
 
+    def _publish(self, jpeg):
+        with self._cond:
+            self._jpeg = jpeg
+            self._seq += 1
+            self._cond.notify_all()
+
+    def next_jpeg(self, last_seq, timeout=1.0):
+        # block until a frame newer than last_seq is published, or timeout (keepalive:
+        # resend the held frame). Event-driven — no polling lag between decode and send.
+        with self._cond:
+            if self._seq == last_seq:
+                self._cond.wait(timeout)
+            return self._jpeg, self._seq
+
     def _placeholder(self, lines, color=(60, 200, 255)):
         img = np.zeros((360, 640, 3), dtype=np.uint8)
         for i, line in enumerate(lines):
             cv2.putText(img, line, (24, 70 + 38 * i),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
         ok, buf = cv2.imencode(".jpg", img)
-        with self._lock:
-            self._jpeg = buf.tobytes() if ok else None
+        self._publish(buf.tobytes() if ok else None)
 
     def run(self):
         enc = [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
@@ -227,8 +242,7 @@ class LensWorker(threading.Thread):
                 self.status = f"online ({self.tier})"
                 ok2, buf = cv2.imencode(".jpg", _fit_height(frame, self.max_height), enc)
                 if ok2:
-                    with self._lock:
-                        self._jpeg = buf.tobytes()
+                    self._publish(buf.tobytes())
                     self.ready = True                # first real frame
                 time.sleep(self.min_period * 0.5)
             cap.release()
@@ -724,13 +738,12 @@ def stream(lens_id):
         return "no such stream", 404
 
     def gen():
-        period = 1.0 / max(CFG["player"].get("target_fps", 15), 1)
+        last = -1
         while True:
-            jpg = w.get_jpeg()
+            jpg, last = w.next_jpeg(last, 1.0)      # wakes instantly on a new frame; 1s keepalive
             if jpg:
                 yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
                        + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
-            time.sleep(period)
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
