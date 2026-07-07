@@ -11,3 +11,7 @@ def test_setup_script_syntax_ok():
 def test_setup_disables_uas_for_usb_root():
     assert "usb-storage.quirks=" in SETUP        # UAS-disable quirk
     assert "ID_VENDOR_ID" in SETUP and "ID_MODEL_ID" in SETUP   # auto-detected, not hardcoded
+
+def test_setup_arms_watchdog_and_panic_reboot():
+    assert "RuntimeWatchdogSec=15s" in SETUP
+    assert "kernel.panic" in SETUP

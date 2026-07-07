@@ -111,4 +111,12 @@ case "$ROOT_SRC" in
     fi ;;
 esac
 
+# --- 9) auto-recovery: arm hardware watchdog + panic reboot (a hung kiosk self-reboots) ---
+sudo mkdir -p /etc/systemd/system.conf.d
+printf '[Manager]\nRuntimeWatchdogSec=15s\nRebootWatchdogSec=2min\n' | \
+  sudo tee /etc/systemd/system.conf.d/watchdog.conf >/dev/null
+printf 'kernel.panic = 10\n' | sudo tee /etc/sysctl.d/99-panic.conf >/dev/null
+sudo sysctl --system >/dev/null 2>&1 || true
+sudo systemctl daemon-reexec 2>/dev/null || true
+
 echo ">> done. Service: $(systemctl is-active dvri-peek.service). Reboot to start the kiosk:  sudo reboot"
