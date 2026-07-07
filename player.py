@@ -31,7 +31,8 @@ import urllib.parse
 
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
-    "rtsp_transport;tcp|stimeout;8000000|max_delay;500000",
+    "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|reorder_queue_size;0"
+    "|max_delay;0|buffer_size;0|stimeout;8000000",
 )
 
 import cv2

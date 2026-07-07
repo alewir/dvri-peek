@@ -227,3 +227,10 @@ def test_next_jpeg_timeout_resends_last():
     s = w._seq
     jpg, seq = w.next_jpeg(s, timeout=0.15)   # no new frame → times out
     assert jpg == b"LAST" and seq == s          # resends the held frame
+
+def test_ffmpeg_capture_options_low_latency():
+    import os, player
+    opts = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", "")
+    for flag in ("rtsp_transport;tcp", "fflags;nobuffer", "flags;low_delay",
+                 "reorder_queue_size;0", "max_delay;0"):
+        assert flag in opts, flag
