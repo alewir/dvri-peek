@@ -96,4 +96,19 @@ printf '[Unit]\nDescription=Force CPU performance governor (24/7 kiosk)\n[Servic
   sudo tee /etc/systemd/system/cpu-performance.service >/dev/null
 sudo systemctl daemon-reload && sudo systemctl enable --now cpu-performance.service >/dev/null 2>&1 || true
 
+# --- 8) USB-SSD reliability: disable UAS on a USB root adapter (prevents hard hangs) ---
+CMDLINE=/boot/firmware/cmdline.txt
+ROOT_SRC="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+case "$ROOT_SRC" in
+  /dev/sd*)
+    if [ -f "$CMDLINE" ] && ! grep -q "usb-storage.quirks=" "$CMDLINE"; then
+      VID="$(udevadm info -q property -n "$ROOT_SRC" 2>/dev/null | sed -n 's/^ID_VENDOR_ID=//p')"
+      PID="$(udevadm info -q property -n "$ROOT_SRC" 2>/dev/null | sed -n 's/^ID_MODEL_ID=//p')"
+      if [ -n "$VID" ] && [ -n "$PID" ]; then
+        sudo sed -i "1 s|\$| usb-storage.quirks=${VID}:${PID}:u|" "$CMDLINE"
+        echo ">> disabled UAS for USB root adapter ${VID}:${PID} (reboot to apply)"
+      fi
+    fi ;;
+esac
+
 echo ">> done. Service: $(systemctl is-active dvri-peek.service). Reboot to start the kiosk:  sudo reboot"
