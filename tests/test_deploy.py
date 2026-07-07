@@ -15,3 +15,8 @@ def test_setup_disables_uas_for_usb_root():
 def test_setup_arms_watchdog_and_panic_reboot():
     assert "RuntimeWatchdogSec=15s" in SETUP
     assert "kernel.panic" in SETUP
+
+def test_setup_installs_heartbeat_and_journald_sync():
+    assert "dvri-heartbeat" in SETUP
+    assert "logger -t dvri-heartbeat" in SETUP
+    assert "SyncIntervalSec=10s" in SETUP

@@ -119,4 +119,18 @@ printf 'kernel.panic = 10\n' | sudo tee /etc/sysctl.d/99-panic.conf >/dev/null
 sudo sysctl --system >/dev/null 2>&1 || true
 sudo systemctl daemon-reexec 2>/dev/null || true
 
+# --- 10) health heartbeat (to journal) + faster journald flush (capture the next freeze) ---
+printf '#!/bin/sh\n# one health line to the journal every run: load, temp, mem, throttle, streams\nLOAD="$(cut -d" " -f1-3 /proc/loadavg)"\nTEMP="$(vcgencmd measure_temp 2>/dev/null | sed "s/temp=//")"\nTHR="$(vcgencmd get_throttled 2>/dev/null | sed "s/throttled=//")"\nMEM="$(free -m | awk "/Mem:/{print \\$3\\"/\\"\\$2\\"MB\\"}")"\nSTREAMS="$(curl -s -m2 http://127.0.0.1:8090/status 2>/dev/null | grep -o \\"status\\" | wc -l)"\nlogger -t dvri-heartbeat "load=$LOAD temp=$TEMP thr=$THR mem=$MEM streams=$STREAMS"\n' | \
+  sudo tee /usr/local/bin/dvri-heartbeat.sh >/dev/null
+sudo chmod +x /usr/local/bin/dvri-heartbeat.sh
+printf '[Unit]\nDescription=dvri-peek health heartbeat\n[Service]\nType=oneshot\nExecStart=/usr/local/bin/dvri-heartbeat.sh\n' | \
+  sudo tee /etc/systemd/system/dvri-heartbeat.service >/dev/null
+printf '[Unit]\nDescription=dvri-peek heartbeat every 60s\n[Timer]\nOnBootSec=60\nOnUnitActiveSec=60\n[Install]\nWantedBy=timers.target\n' | \
+  sudo tee /etc/systemd/system/dvri-heartbeat.timer >/dev/null
+sudo mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nSyncIntervalSec=10s\n' | \
+  sudo tee /etc/systemd/journald.conf.d/sync.conf >/dev/null
+sudo systemctl daemon-reload && sudo systemctl enable --now dvri-heartbeat.timer >/dev/null 2>&1 || true
+sudo systemctl restart systemd-journald 2>/dev/null || true
+
 echo ">> done. Service: $(systemctl is-active dvri-peek.service). Reboot to start the kiosk:  sudo reboot"
