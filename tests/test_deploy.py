@@ -32,3 +32,7 @@ def test_setup_installs_network_watchdog():
     assert "ip route show default" in nw          # pings the LAN gateway, not the internet
     assert "systemctl reboot" in nw               # reboot is the reliable recovery on Pi 5 WiFi
     assert 'up" -lt 300' in nw                     # boot grace period (no false trigger during boot)
+
+def test_kiosk_disables_gpu():
+    k = (ROOT / "kiosk.sh").read_text()
+    assert "--disable-gpu" in k        # vc4 GPU wedge freezes the whole display; software render avoids it

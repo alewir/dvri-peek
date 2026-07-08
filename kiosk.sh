@@ -18,9 +18,14 @@ rm -rf "$PROFILE"; mkdir -p "$PROFILE/cache"
 # chromium vs chromium-browser depending on distro
 CHROME="$(command -v chromium || command -v chromium-browser)"
 
+# --disable-gpu: force software rendering. The Pi 5 vc4 GPU can wedge under Chromium and
+# freeze the ENTIRE display (compositor stops presenting) while the system/network/streams
+# stay healthy — so no watchdog catches it and it needs a manual restart. The MJPEG camera
+# tiles don't need GPU compositing, so software render removes this whole freeze class.
 exec "$CHROME" \
   --ozone-platform=wayland \
   --kiosk "$URL" \
+  --disable-gpu \
   --user-data-dir="$PROFILE" \
   --disk-cache-dir="$PROFILE/cache" --disk-cache-size=33554432 \
   --noerrdialogs --disable-infobars --disable-session-crashed-bubble \
