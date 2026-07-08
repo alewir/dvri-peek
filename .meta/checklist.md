@@ -9,13 +9,19 @@
   BCM43455 brcmfmac wedge (only a reboot recovers). Watchdog built (auto-reboot on gateway loss);
   **recommend wired Ethernet** as the durable fix. SEE `.meta/raspi-setup.md`.
 
+## Camera limitation (3-lens cam .190) — needs a decision, not more software
+- [ ] **3-lens cam can't serve all 3 substreams reliably.** Whichever way lens1 is configured, a
+  lens ends up stale (`online` via RTSP fallback but frozen) or disconnected (`no signal` DVRIP-only),
+  and the struggling lens *migrates* (lens1→lens2…). This is a camera hardware/firmware limit, not a
+  software bug — confirmed after 2 config attempts + worker stall-recovery couldn't fix it (staleness
+  is in go2rtc's producer, upstream of the OpenCV worker). Options: accept (RTSP fallback keeps lens1
+  `online` showing the scene); reduce load (drop a lens, or don't pull all 3 subs); camera firmware;
+  or the cam may be degrading. lens1 `rtsp_channel: 1` fallback RESTORED on the Pi (DVRIP-only was worse).
+
 ## Follow-ups (surfaced by the 2026-07-08 blank-panels incident)
-- [ ] **Worker stall-recovery.** A stalled upstream stream (connection alive but video not
-  advancing → `cap.read()` returns the *same* frame, or blocks; `stimeout` doesn't fire) stays
-  frozen forever until a restart. The old `/stream` masked this (re-sent the last frame 15×/s so a
-  frozen lens looked live); the event-driven handoff now reveals it. Add a per-worker liveness
-  check: no NEW unique frame for ~N s → force reconnect (release+reopen the capture). Makes any
-  stall self-heal. Design carefully (threading; a blocked `read()` needs an out-of-band release).
+- [x] **Worker stall-recovery** — DONE (commit a86bdd3): per-worker liveness check, byte-identical
+  frames > `STALL_TIMEOUT`=12s → force reconnect. Correct + helps genuine OpenCV-worker stalls; does
+  NOT fix go2rtc-producer-level staleness from the flaky camera (that's the item above).
 - [ ] **Client-side MJPEG auto-reconnect.** After a `dvri-peek` service restart, the kiosk's
   `<img>` MJPEG streams drop and don't reconnect → blank panels until a manual kiosk reload.
   Add JS to detect a stalled/errored stream and re-set `img.src`. (Interim: deploys must
