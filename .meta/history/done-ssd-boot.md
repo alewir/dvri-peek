@@ -1,9 +1,15 @@
 # Plan — Boot dvri-peek Pi from the USB SATA SSD (reliability + speed)
 
-Status: ✅ DONE 2026-07-02 · root now `/dev/sda2` (SSD `ada6a050`, 109G), `BOOT_ORDER=0xf14`
-(USB→SD fallback), app + hardening + kiosk verified, `fstrim.timer` on. Cloned via `rpi-clone
-sda -f -U`; had to hand-fix the SSD `cmdline.txt` root PARTUUID (rpi-clone only rewrote fstab).
-See `.meta/raspi-setup.md` → "Root on USB SSD" for the runbook + recovery.
+Status: ⚠️ SUPERSEDED 2026-07-08 — reverted to SD. The SSD proved unreliable as a BOOT device:
+while running on it the Pi hard-locked, and on reset the bootloader could not bring up the flaky
+OWC UAS adapter and fell back to the SD. Root is `/dev/mmcblk0p2` again, `BOOT_ORDER=0xf41`
+(SD-first), SSD left dormant. The `usb-storage.quirks` fix only helps the kernel, not the
+bootloader, so it could not fix the boot-fallback. See `.meta/raspi-setup.md` → "Boot medium:
+reverted to SD (2026-07-08)". (Original 2026-07-02 migration record retained below.)
+
+Original: ✅ DONE 2026-07-02 · root `/dev/sda2` (SSD `ada6a050`, 109G), `BOOT_ORDER=0xf14`, cloned
+via `rpi-clone sda -f -U`; hand-fixed the SSD `cmdline.txt` root PARTUUID (rpi-clone only rewrote
+fstab).
 
 ## Goal
 Move the Pi's root filesystem from the microSD (`mmcblk0`, the #1 reliability risk on a
