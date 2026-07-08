@@ -141,6 +141,9 @@ def _fit_height(frame, max_h):
     return cv2.resize(frame, (nw, max_h), interpolation=cv2.INTER_AREA)
 
 
+STALL_TIMEOUT = 12.0    # seconds of byte-identical frames → treat the stream as stalled, reconnect
+
+
 class LensWorker(threading.Thread):
     def __init__(self, lens_id, name, gw, jpeg_quality, target_fps, tier, max_height=None):
         super().__init__(daemon=True)
@@ -156,6 +159,8 @@ class LensWorker(threading.Thread):
         self._cond = threading.Condition(self._lock)   # signals a newly published frame
         self._jpeg = None
         self._seq = 0                                   # bumps on every published frame
+        self._prev_jpeg = None                          # last encoded frame (stall detection)
+        self._last_change_ts = 0.0                      # when the frame last changed; reset on cap open
         self._stop = threading.Event()
         self.ready = False               # True once >=1 real frame decoded
         self.status = "connecting"
@@ -191,6 +196,18 @@ class LensWorker(threading.Thread):
                 self._cond.wait(timeout)
             return self._jpeg, self._seq
 
+    def _note_frame(self, jpg, now):
+        # Track when the encoded frame last actually CHANGED. A live camera never yields
+        # byte-identical consecutive JPEGs (sensor noise), so an unchanging frame means the
+        # upstream stream has stalled (the camera's DVRIP substream can freeze while the
+        # connection stays alive — cap.read() keeps returning the same frame).
+        if jpg != self._prev_jpeg:
+            self._prev_jpeg = jpg
+            self._last_change_ts = now
+
+    def _stalled(self, now):
+        return (now - self._last_change_ts) > STALL_TIMEOUT
+
     def _placeholder(self, lines, color=(60, 200, 255)):
         img = np.zeros((360, 640, 3), dtype=np.uint8)
         for i, line in enumerate(lines):
@@ -220,6 +237,7 @@ class LensWorker(threading.Thread):
             fail = 0
             t_prev = time.time()
             fps_ema = 0.0
+            self._last_change_ts = t_prev        # start the stall clock fresh on (re)connect
             while not self._stop.is_set():
                 ok, frame = cap.read()
                 if not ok or frame is None:
@@ -243,8 +261,13 @@ class LensWorker(threading.Thread):
                 self.status = f"online ({self.tier})"
                 ok2, buf = cv2.imencode(".jpg", _fit_height(frame, self.max_height), enc)
                 if ok2:
-                    self._publish(buf.tobytes())
+                    jpg = buf.tobytes()
+                    self._note_frame(jpg, now)
+                    self._publish(jpg)
                     self.ready = True                # first real frame
+                    if self._stalled(now):           # frozen upstream (same frame too long) → reconnect
+                        self.status = "reconnecting (stalled stream)"
+                        break
                 time.sleep(self.min_period * 0.5)
             cap.release()
 

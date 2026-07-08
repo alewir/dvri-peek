@@ -220,6 +220,21 @@ def test_next_jpeg_wakes_on_publish():
     assert not t.is_alive()  # returned on the event, not the timeout
     assert got["jpg"] == b"B" and got["seq"] == start + 1
 
+def test_worker_stall_detection():
+    # CAUSAL: identical encoded frames for > STALL_TIMEOUT = a stalled upstream stream (a live
+    # camera never yields byte-identical consecutive JPEGs). _note_frame holds the change-clock
+    # while frames repeat; _stalled fires once the gap exceeds the timeout; a new frame resets it.
+    import player
+    ST = player.STALL_TIMEOUT
+    w = player.LensWorker("l", "L", {}, 75, 15, "sub")
+    w._note_frame(b"A", 100.0);            assert w._last_change_ts == 100.0   # first frame
+    w._note_frame(b"A", 100.0 + ST - 1);   assert w._last_change_ts == 100.0   # identical → clock held
+    assert w._stalled(100.0 + ST + 1) is True     # frozen past the timeout
+    assert w._stalled(100.0 + ST - 1) is False
+    w._note_frame(b"B", 200.0);            assert w._last_change_ts == 200.0   # changed → clock reset
+    assert w._stalled(200.0 + 1) is False
+
+
 def test_next_jpeg_timeout_resends_last():
     import player
     w = player.LensWorker("l", "L", {}, 75, 15, "sub")
