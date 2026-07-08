@@ -69,19 +69,19 @@
  #cal-controls{flex:0 0 auto;display:flex;align-items:center;gap:6px;
    padding:8px 12px;border-bottom:1px solid #ffffff0f}
  #cal-controls button{background:transparent;border:1px solid #ffffff1c;color:#a1a1aa;
-   border-radius:4px;padding:3px 10px;cursor:pointer;font-size:12px;letter-spacing:.02em;
+   border-radius:4px;padding:3px 10px;cursor:pointer;font-size:13px;letter-spacing:.02em;
    transition:color .12s,border-color .12s}
  #cal-controls button:hover:not(:disabled){color:#e4e4e7;border-color:#ffffff38}
  #cal-controls button:disabled{opacity:.22;cursor:default}
- #cal-label{font-size:14px;font-weight:600;letter-spacing:.05em;color:#e4e4e7;flex:1;text-align:center}
+ #cal-label{font-size:15px;font-weight:600;letter-spacing:.05em;color:#e4e4e7;flex:1;text-align:center}
  #cal-mode{flex:none}
  #cal-body{flex:1 1 auto;min-height:0;overflow:hidden}
- .err{color:#fca5a5;padding:10px;font-size:13px}
+ .err{color:#fca5a5;padding:10px;font-size:14px}
 
  /* news band — TV-style slow crawl across the bottom */
  #newsband{grid-area:news;min-width:0;display:flex;align-items:center;
    overflow:hidden;padding:7px 14px;border-top:1px solid #ffffff12;background:#0b0b0d}
- .news-eyebrow{flex:0 0 auto;font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+ .news-eyebrow{flex:0 0 auto;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
    color:#e8c870;opacity:.7;margin-right:14px}
  .news-vp{flex:1 1 auto;min-width:0;overflow:hidden}
  /* track holds the headlines TWICE; translating by -50% (one copy width) loops seamlessly.
@@ -90,15 +90,15 @@
    animation:news-scroll linear infinite}
  @keyframes news-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
  @media(prefers-reduced-motion:reduce){.news-track{animation:none}}
- #newsband .ni{flex:0 0 auto;font-size:13px;line-height:1.2}
- #newsband .ni::after{content:"◆";color:#e8c870;opacity:.32;margin:0 18px;font-size:8px;vertical-align:middle}
+ #newsband .ni{flex:0 0 auto;font-size:14px;line-height:1.2}
+ #newsband .ni::after{content:"◆";color:#e8c870;opacity:.32;margin:0 18px;font-size:9px;vertical-align:middle}
  #newsband .src{opacity:.4;font-size:.85em}
- #newsband .empty{opacity:.4;font-size:13px}
+ #newsband .empty{opacity:.4;font-size:14px}
 
  /* ── month grid (from calendar view) ──────────────────────── */
  .cal-month{display:flex;flex-direction:column;height:100%}
  .cal-dowrow{display:grid;grid-template-columns:repeat(7,1fr);flex:0 0 auto;border-bottom:1px solid #ffffff1c}
- .cal-dow{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;padding:3px 6px}
+ .cal-dow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;padding:3px 6px}
  .cal-weekrow{position:relative;flex:1 1 0;min-height:0;overflow:hidden;
    display:grid;grid-template-columns:repeat(7,1fr)}
  .cal-cell{position:relative;padding:2px 3px;overflow:hidden;min-height:0;display:flex;flex-direction:column;
@@ -112,37 +112,37 @@
  .cal-cell.today{animation:today-pulse 4s ease-in-out infinite}
  .cal-cell.today .cal-date{color:#60a5fa;font-weight:700}
  @media(prefers-reduced-motion:reduce){.cal-cell.today{animation:none;box-shadow:inset 0 0 0 1px #2563eb}}
- .cal-date{font-size:12px;font-weight:600;line-height:16px;height:16px;color:#c4c4c8;flex:0 0 auto}
+ .cal-date{font-size:13px;font-weight:600;line-height:16px;height:16px;color:#c4c4c8;flex:0 0 auto}
  .cal-spanspace{flex:0 0 auto}
  .cal-spanlayer{position:absolute;left:0;right:0;top:var(--date-h);
    display:grid;grid-template-columns:repeat(7,1fr);
    grid-auto-rows:var(--bar-h);column-gap:0;row-gap:var(--bar-gap);pointer-events:none}
- .spanbar{font-size:10px;font-weight:600;border-radius:3px;padding:0 6px;margin:0 1px;color:#fff;
+ .spanbar{font-size:11px;font-weight:600;border-radius:3px;padding:0 6px;margin:0 1px;color:#fff;
    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
    height:var(--bar-h);line-height:var(--bar-h);box-shadow:0 1px 2px #00000040}
- .chip{font-size:10px;font-weight:500;border-radius:3px;padding:1px 4px;margin-top:1px;
+ .chip{font-size:11px;font-weight:500;border-radius:3px;padding:1px 4px;margin-top:1px;
    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:14px}
  .chip .dot{display:inline-block;width:5px;height:5px;border-radius:50%;flex:0 0 5px;margin-right:3px;vertical-align:middle}
- .more{font-size:9px;opacity:.4;margin-top:1px;padding-left:2px}
+ .more{font-size:10px;opacity:.4;margin-top:1px;padding-left:2px}
 
  /* ── week view (from calendar view) ───────────────────────── */
  .cal-week{display:flex;flex-direction:column;height:100%}
  .cal-allday{display:grid;grid-template-columns:48px repeat(7,1fr);
    border-bottom:1px solid #ffffff20;min-height:24px;padding-bottom:2px}
- .cal-allday .lbl{font-size:10px;opacity:.5;padding:4px 3px;letter-spacing:.04em}
- .cal-allday .spanbar{font-size:10px;font-weight:600;border-radius:3px;padding:0 5px;margin:2px 1px 0;
+ .cal-allday .lbl{font-size:11px;opacity:.5;padding:4px 3px;letter-spacing:.04em}
+ .cal-allday .spanbar{font-size:11px;font-weight:600;border-radius:3px;padding:0 5px;margin:2px 1px 0;
    height:16px;line-height:16px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
    box-shadow:0 1px 2px #00000040;align-self:start}
  .cal-hours{flex:1 1 auto;overflow:auto;display:grid;grid-template-columns:48px repeat(7,1fr);position:relative}
- .hourlab{font-size:10px;color:#6b7280;height:40px;border-top:1px solid #ffffff10;padding:1px 4px;letter-spacing:.01em}
+ .hourlab{font-size:11px;color:#6b7280;height:40px;border-top:1px solid #ffffff10;padding:1px 4px;letter-spacing:.01em}
  .daycol{position:relative;border-left:1px solid #ffffff10}
  .hcell{height:40px;border-top:1px solid #ffffff10}
  .daycol.today{background:#2563eb14;border-top:1px solid #3b82f666}
- .tblock{position:absolute;left:2px;right:2px;border-radius:4px;color:#fff;font-size:10px;font-weight:500;
+ .tblock{position:absolute;left:2px;right:2px;border-radius:4px;color:#fff;font-size:11px;font-weight:500;
    padding:1px 4px;overflow:hidden;box-shadow:0 1px 3px #00000050;line-height:13px;white-space:nowrap;cursor:default}
  .cal-week-header{display:grid;grid-template-columns:48px repeat(7,1fr);flex:0 0 auto;border-bottom:1px solid #ffffff1c}
  .cal-week-header .wh-lbl{width:48px}
- .whdcol{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;padding:3px 4px;text-align:center}
+ .whdcol{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;padding:3px 4px;text-align:center}
  .whdcol.today{color:#60a5fa;font-weight:700}
 </style></head><body>
 <!-- PREVIEW (tile / filler): clock + weather + next few events, fit-to-tile no-scroll -->
