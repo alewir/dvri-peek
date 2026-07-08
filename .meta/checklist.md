@@ -1,5 +1,14 @@
 # dvri-peek — open items
 
+## Pending deploy (Pi was offline — deploy when back)
+- [ ] **Deploy + verify network watchdog** — `git pull` + `bash deploy/setup-pi.sh` on the Pi
+  applies section 11 (`dvri-netwatch.timer`); verify `systemctl is-active dvri-netwatch.timer` +
+  a `journalctl -t dvri-netwatch` line. Then re-confirm the **wired-Ethernet vs WiFi** decision.
+- [ ] **WiFi wedged again (2026-07-08 incident #2)** — Pi 100% unreachable, kiosk stuck on
+  "waiting for camera credentials" (go2rtc couldn't reach cameras over dead WiFi). Root: Pi 5
+  BCM43455 brcmfmac wedge (only a reboot recovers). Watchdog built (auto-reboot on gateway loss);
+  **recommend wired Ethernet** as the durable fix. SEE `.meta/raspi-setup.md`.
+
 ## Follow-ups (surfaced by the 2026-07-08 blank-panels incident)
 - [ ] **Worker stall-recovery.** A stalled upstream stream (connection alive but video not
   advancing → `cap.read()` returns the *same* frame, or blocks; `stimeout` doesn't fire) stays

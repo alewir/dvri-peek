@@ -133,4 +133,13 @@ printf '[Journal]\nSyncIntervalSec=10s\n' | \
 sudo systemctl daemon-reload && sudo systemctl enable --now dvri-heartbeat.timer >/dev/null 2>&1 || true
 sudo systemctl restart systemd-journald 2>/dev/null || true
 
+# --- 11) network watchdog: reboot on sustained LAN-gateway loss (recovers a wedged WiFi) -------
+echo ">> installing network watchdog..."
+sudo install -m 0755 "$DIR/deploy/dvri-netwatch.sh" /usr/local/bin/dvri-netwatch.sh
+printf '[Unit]\nDescription=dvri-peek network watchdog\n[Service]\nType=oneshot\nExecStart=/usr/local/bin/dvri-netwatch.sh\n' | \
+  sudo tee /etc/systemd/system/dvri-netwatch.service >/dev/null
+printf '[Unit]\nDescription=dvri-peek network watchdog every 60s\n[Timer]\nOnBootSec=120\nOnUnitActiveSec=60\n[Install]\nWantedBy=timers.target\n' | \
+  sudo tee /etc/systemd/system/dvri-netwatch.timer >/dev/null
+sudo systemctl daemon-reload && sudo systemctl enable --now dvri-netwatch.timer >/dev/null 2>&1 || true
+
 echo ">> done. Service: $(systemctl is-active dvri-peek.service). Reboot to start the kiosk:  sudo reboot"
