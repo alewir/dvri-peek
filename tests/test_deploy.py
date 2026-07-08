@@ -33,6 +33,20 @@ def test_setup_installs_network_watchdog():
     assert "systemctl reboot" in nw               # reboot is the reliable recovery on Pi 5 WiFi
     assert 'up" -lt 300' in nw                     # boot grace period (no false trigger during boot)
 
-def test_kiosk_disables_gpu():
-    k = (ROOT / "kiosk.sh").read_text()
-    assert "--disable-gpu" in k        # vc4 GPU wedge freezes the whole display; software render avoids it
+def test_kiosk_keeps_gpu():
+    # GPU stays ON — software render (--disable-gpu) saturated the CPU; the display watchdog
+    # recovers the occasional vc4 freeze instead.
+    assert "--disable-gpu" not in (ROOT / "kiosk.sh").read_text()
+
+def test_dispwatch_script_syntax_ok():
+    r = subprocess.run(["bash", "-n", str(ROOT / "deploy" / "dvri-dispwatch.sh")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+def test_setup_installs_display_watchdog():
+    assert "dvri-dispwatch.sh" in SETUP and "dvri-dispwatch.timer" in SETUP
+    assert "grim" in SETUP                       # screencopy tool the probe needs
+    dw = (ROOT / "deploy" / "dvri-dispwatch.sh").read_text()
+    assert "grim -g" in dw                        # 1px screencopy liveness probe
+    assert "pkill chromium" in dw                 # recovery = restart the kiosk browser
+    assert 'N" -ge 2' in dw                       # two consecutive misses before acting

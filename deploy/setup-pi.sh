@@ -23,7 +23,8 @@ sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   python3-opencv python3-flask python3-numpy python3-yaml \
   chromium curl git \
-  fonts-noto-color-emoji     # weather + UI emoji glyphs (else they render as tofu boxes)
+  fonts-noto-color-emoji \
+  grim                       # weather/UI emoji glyphs; grim = Wayland screencopy for the display watchdog
 
 # --- 2) go2rtc binary for this CPU architecture ------------------------------
 if [ ! -x "$DIR/go2rtc" ]; then
@@ -141,5 +142,14 @@ printf '[Unit]\nDescription=dvri-peek network watchdog\n[Service]\nType=oneshot\
 printf '[Unit]\nDescription=dvri-peek network watchdog every 60s\n[Timer]\nOnBootSec=120\nOnUnitActiveSec=60\n[Install]\nWantedBy=timers.target\n' | \
   sudo tee /etc/systemd/system/dvri-netwatch.timer >/dev/null
 sudo systemctl daemon-reload && sudo systemctl enable --now dvri-netwatch.timer >/dev/null 2>&1 || true
+
+# --- 12) display watchdog: recover a frozen Wayland/vc4 display (kiosk restart) ---------------
+echo ">> installing display watchdog..."
+sudo install -m 0755 "$DIR/deploy/dvri-dispwatch.sh" /usr/local/bin/dvri-dispwatch.sh
+printf '[Unit]\nDescription=dvri-peek display watchdog\n[Service]\nType=oneshot\nExecStart=/usr/local/bin/dvri-dispwatch.sh\n' | \
+  sudo tee /etc/systemd/system/dvri-dispwatch.service >/dev/null
+printf '[Unit]\nDescription=dvri-peek display watchdog every 30s\n[Timer]\nOnBootSec=180\nOnUnitActiveSec=30\n[Install]\nWantedBy=timers.target\n' | \
+  sudo tee /etc/systemd/system/dvri-dispwatch.timer >/dev/null
+sudo systemctl daemon-reload && sudo systemctl enable --now dvri-dispwatch.timer >/dev/null 2>&1 || true
 
 echo ">> done. Service: $(systemctl is-active dvri-peek.service). Reboot to start the kiosk:  sudo reboot"
