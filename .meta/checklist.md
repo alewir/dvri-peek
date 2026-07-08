@@ -28,6 +28,15 @@
   `pkill chromium` to reload the kiosk — already the documented step.)
 
 ## Done (recent)
+- [x] **Display freeze ("hanging") — 2026-07-08.** Root cause: Chromium wedges the Pi 5 **vc4 GPU**,
+  freezing the WHOLE display (compositor stops presenting) while system/network/streams stay healthy
+  — so the hang-watchdog never fires. Proof: `grim` screencopy hung during the freeze, worked the
+  instant Chromium was killed. `--disable-gpu` (software render) prevents it but SATURATED the CPU
+  (chromium ~150% + player ~150% → load ~7) so it was reverted. Fix: **dvri-dispwatch** watchdog —
+  probes a 1px `grim` screencopy every 30s; 2 consecutive timeouts → `pkill chromium` (lwrespawn
+  relaunches). GPU kept on. Now **4 watchdogs**: hang(15s)/network/display/heartbeat. Steady load
+  ~5/4cores rendering 4 streams (inherent; temp ~73°C, no throttle) — a candidate for later trimming.
+
 - [x] **Blank panels (2026-07-08)** — (1) stale kiosk MJPEG connections after a service restart →
   reloaded the kiosk; (2) lens1 frozen (0.2 fps) because its `rtsp_channel` RTSP-fallback producer
   served stale frames in go2rtc → removed the fallback (lens1 now DVRIP-only, 12.8 fps). All 4
